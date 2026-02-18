@@ -3,78 +3,78 @@
 
 enum NavAttributeType
 {
-    NAV_MESH_INVALID = 0,
-    NAV_MESH_CROUCH  = 0x0000001,      // must crouch to use this node/area
-    NAV_MESH_JUMP    = 0x0000002,      // must jump to traverse this area (only used during generation)
-    NAV_MESH_PRECISE   = 0x0000004,    // do not adjust for obstacles, just move along area
-    NAV_MESH_NO_JUMP   = 0x0000008,    // inhibit discontinuity jumping
-    NAV_MESH_STOP      = 0x0000010,    // must stop when entering this area
-    NAV_MESH_RUN       = 0x0000020,    // must run to traverse this area
-    NAV_MESH_WALK      = 0x0000040,    // must walk to traverse this area
-    NAV_MESH_AVOID     = 0x0000080,    // avoid this area unless alternatives are too dangerous
-    NAV_MESH_TRANSIENT = 0x0000100,    // area may become blocked, and should be periodically checked
-    NAV_MESH_DONT_HIDE   = 0x0000200,  // area should not be considered for hiding spot generation
-    NAV_MESH_STAND       = 0x0000400,  // bots hiding in this area should stand
-    NAV_MESH_NO_HOSTAGES = 0x0000800,  // hostages shouldn't use this area
-    NAV_MESH_STAIRS      = 0x0001000,  // this area represents stairs, do not attempt to climb or jump them - just walk up
-    NAV_MESH_NO_MERGE     = 0x0002000, // don't merge this area with adjacent areas
-    NAV_MESH_OBSTACLE_TOP = 0x0004000, // this nav area is the climb point on the tip of an obstacle
-    NAV_MESH_CLIFF        = 0x0008000, // this nav area is adjacent to a drop of at least CliffHeight
+	NAV_MESH_INVALID = 0,
+	NAV_MESH_CROUCH = 0x0000001,      // must crouch to use this node/area
+	NAV_MESH_JUMP = 0x0000002,      // must jump to traverse this area (only used during generation)
+	NAV_MESH_PRECISE = 0x0000004,    // do not adjust for obstacles, just move along area
+	NAV_MESH_NO_JUMP = 0x0000008,    // inhibit discontinuity jumping
+	NAV_MESH_STOP = 0x0000010,    // must stop when entering this area
+	NAV_MESH_RUN = 0x0000020,    // must run to traverse this area
+	NAV_MESH_WALK = 0x0000040,    // must walk to traverse this area
+	NAV_MESH_AVOID = 0x0000080,    // avoid this area unless alternatives are too dangerous
+	NAV_MESH_TRANSIENT = 0x0000100,    // area may become blocked, and should be periodically checked
+	NAV_MESH_DONT_HIDE = 0x0000200,  // area should not be considered for hiding spot generation
+	NAV_MESH_STAND = 0x0000400,  // bots hiding in this area should stand
+	NAV_MESH_NO_HOSTAGES = 0x0000800,  // hostages shouldn't use this area
+	NAV_MESH_STAIRS = 0x0001000,  // this area represents stairs, do not attempt to climb or jump them - just walk up
+	NAV_MESH_NO_MERGE = 0x0002000, // don't merge this area with adjacent areas
+	NAV_MESH_OBSTACLE_TOP = 0x0004000, // this nav area is the climb point on the tip of an obstacle
+	NAV_MESH_CLIFF = 0x0008000, // this nav area is adjacent to a drop of at least CliffHeight
 
-    NAV_MESH_FIRST_CUSTOM = 0x00010000, // apps may define custom app-specific bits starting with this value
-    NAV_MESH_LAST_CUSTOM = 0x04000000,  // apps must not define custom app-specific bits higher than with this value
+	NAV_MESH_FIRST_CUSTOM = 0x00010000, // apps may define custom app-specific bits starting with this value
+	NAV_MESH_LAST_CUSTOM = 0x04000000,  // apps must not define custom app-specific bits higher than with this value
 
-    NAV_MESH_HAS_ELEVATOR = 0x40000000, // area is in an elevator's path
-    NAV_MESH_NAV_BLOCKER  = 0x80000000, // area is blocked by nav blocker (Alas, needed to hijack a bit in the attributes to get within a cache line [7/24/2008 tom])
+	NAV_MESH_HAS_ELEVATOR = 0x40000000, // area is in an elevator's path
+	NAV_MESH_NAV_BLOCKER = 0x80000000, // area is blocked by nav blocker (Alas, needed to hijack a bit in the attributes to get within a cache line [7/24/2008 tom])
 };
 
 enum TFNavAttributeType
 {
-    TF_NAV_INVALID = 0x00000000,
+	TF_NAV_INVALID = 0x00000000,
 
-    // Also look for NAV_MESH_NAV_BLOCKER (w/ nav_debug_blocked ConVar).
-    TF_NAV_BLOCKED         = 0x00000001, // blocked for some TF-specific reason
-    TF_NAV_SPAWN_ROOM_RED  = 0x00000002,
-    TF_NAV_SPAWN_ROOM_BLUE = 0x00000004,
-    TF_NAV_SPAWN_ROOM_EXIT = 0x00000008,
-    TF_NAV_HAS_AMMO        = 0x00000010,
-    TF_NAV_HAS_HEALTH      = 0x00000020,
-    TF_NAV_CONTROL_POINT   = 0x00000040,
+	// Also look for NAV_MESH_NAV_BLOCKER (w/ nav_debug_blocked ConVar).
+	TF_NAV_BLOCKED = 0x00000001, // blocked for some TF-specific reason
+	TF_NAV_SPAWN_ROOM_RED = 0x00000002,
+	TF_NAV_SPAWN_ROOM_BLUE = 0x00000004,
+	TF_NAV_SPAWN_ROOM_EXIT = 0x00000008,
+	TF_NAV_HAS_AMMO = 0x00000010,
+	TF_NAV_HAS_HEALTH = 0x00000020,
+	TF_NAV_CONTROL_POINT = 0x00000040,
 
-    TF_NAV_BLUE_SENTRY_DANGER = 0x00000080, // sentry can potentially fire upon enemies in this area
-    TF_NAV_RED_SENTRY_DANGER  = 0x00000100,
+	TF_NAV_BLUE_SENTRY_DANGER = 0x00000080, // sentry can potentially fire upon enemies in this area
+	TF_NAV_RED_SENTRY_DANGER = 0x00000100,
 
-    TF_NAV_BLUE_SETUP_GATE             = 0x00000800, // this area is blocked until the setup period is over
-    TF_NAV_RED_SETUP_GATE              = 0x00001000, // this area is blocked until the setup period is over
-    TF_NAV_BLOCKED_AFTER_POINT_CAPTURE = 0x00002000, // this area becomes blocked after the first point is capped
-    TF_NAV_BLOCKED_UNTIL_POINT_CAPTURE = 0x00004000, // this area is blocked until the first point is capped, then is unblocked
-    TF_NAV_BLUE_ONE_WAY_DOOR           = 0x00008000,
-    TF_NAV_RED_ONE_WAY_DOOR            = 0x00010000,
+	TF_NAV_BLUE_SETUP_GATE = 0x00000800, // this area is blocked until the setup period is over
+	TF_NAV_RED_SETUP_GATE = 0x00001000, // this area is blocked until the setup period is over
+	TF_NAV_BLOCKED_AFTER_POINT_CAPTURE = 0x00002000, // this area becomes blocked after the first point is capped
+	TF_NAV_BLOCKED_UNTIL_POINT_CAPTURE = 0x00004000, // this area is blocked until the first point is capped, then is unblocked
+	TF_NAV_BLUE_ONE_WAY_DOOR = 0x00008000,
+	TF_NAV_RED_ONE_WAY_DOOR = 0x00010000,
 
-    TF_NAV_WITH_SECOND_POINT = 0x00020000, // modifier for BLOCKED_*_POINT_CAPTURE
-    TF_NAV_WITH_THIRD_POINT  = 0x00040000, // modifier for BLOCKED_*_POINT_CAPTURE
-    TF_NAV_WITH_FOURTH_POINT = 0x00080000, // modifier for BLOCKED_*_POINT_CAPTURE
-    TF_NAV_WITH_FIFTH_POINT  = 0x00100000, // modifier for BLOCKED_*_POINT_CAPTURE
+	TF_NAV_WITH_SECOND_POINT = 0x00020000, // modifier for BLOCKED_*_POINT_CAPTURE
+	TF_NAV_WITH_THIRD_POINT = 0x00040000, // modifier for BLOCKED_*_POINT_CAPTURE
+	TF_NAV_WITH_FOURTH_POINT = 0x00080000, // modifier for BLOCKED_*_POINT_CAPTURE
+	TF_NAV_WITH_FIFTH_POINT = 0x00100000, // modifier for BLOCKED_*_POINT_CAPTURE
 
-    TF_NAV_SNIPER_SPOT = 0x00200000, // this is a good place for a sniper to lurk
-    TF_NAV_SENTRY_SPOT = 0x00400000, // this is a good place to build a sentry
+	TF_NAV_SNIPER_SPOT = 0x00200000, // this is a good place for a sniper to lurk
+	TF_NAV_SENTRY_SPOT = 0x00400000, // this is a good place to build a sentry
 
-    TF_NAV_ESCAPE_ROUTE         = 0x00800000, // for Raid mode
-    TF_NAV_ESCAPE_ROUTE_VISIBLE = 0x01000000, // all areas that have visibility to the escape route
+	TF_NAV_ESCAPE_ROUTE = 0x00800000, // for Raid mode
+	TF_NAV_ESCAPE_ROUTE_VISIBLE = 0x01000000, // all areas that have visibility to the escape route
 
-    TF_NAV_NO_SPAWNING = 0x02000000, // don't spawn bots in this area
+	TF_NAV_NO_SPAWNING = 0x02000000, // don't spawn bots in this area
 
-    TF_NAV_RESCUE_CLOSET = 0x04000000, // for respawning friends in Raid mode
+	TF_NAV_RESCUE_CLOSET = 0x04000000, // for respawning friends in Raid mode
 
-    TF_NAV_BOMB_CAN_DROP_HERE = 0x08000000, // the bomb can be dropped here and reached by the invaders in MvM
+	TF_NAV_BOMB_CAN_DROP_HERE = 0x08000000, // the bomb can be dropped here and reached by the invaders in MvM
 
-    TF_NAV_DOOR_NEVER_BLOCKS  = 0x10000000,
-    TF_NAV_DOOR_ALWAYS_BLOCKS = 0x20000000,
+	TF_NAV_DOOR_NEVER_BLOCKS = 0x10000000,
+	TF_NAV_DOOR_ALWAYS_BLOCKS = 0x20000000,
 
-    TF_NAV_UNBLOCKABLE = 0x40000000, // this area cannot be blocked
+	TF_NAV_UNBLOCKABLE = 0x40000000, // this area cannot be blocked
 
-    // save/load these manually set flags, and don't clear them between rounds
-    TF_NAV_PERSISTENT_ATTRIBUTES = TF_NAV_SNIPER_SPOT | TF_NAV_SENTRY_SPOT | TF_NAV_NO_SPAWNING | TF_NAV_BLUE_SETUP_GATE | TF_NAV_RED_SETUP_GATE | TF_NAV_BLOCKED_AFTER_POINT_CAPTURE | TF_NAV_BLOCKED_UNTIL_POINT_CAPTURE | TF_NAV_BLUE_ONE_WAY_DOOR | TF_NAV_RED_ONE_WAY_DOOR | TF_NAV_DOOR_NEVER_BLOCKS | TF_NAV_DOOR_ALWAYS_BLOCKS | TF_NAV_UNBLOCKABLE | TF_NAV_WITH_SECOND_POINT | TF_NAV_WITH_THIRD_POINT | TF_NAV_WITH_FOURTH_POINT | TF_NAV_WITH_FIFTH_POINT | TF_NAV_RESCUE_CLOSET
+	// save/load these manually set flags, and don't clear them between rounds
+	TF_NAV_PERSISTENT_ATTRIBUTES = TF_NAV_SNIPER_SPOT | TF_NAV_SENTRY_SPOT | TF_NAV_NO_SPAWNING | TF_NAV_BLUE_SETUP_GATE | TF_NAV_RED_SETUP_GATE | TF_NAV_BLOCKED_AFTER_POINT_CAPTURE | TF_NAV_BLOCKED_UNTIL_POINT_CAPTURE | TF_NAV_BLUE_ONE_WAY_DOOR | TF_NAV_RED_ONE_WAY_DOOR | TF_NAV_DOOR_NEVER_BLOCKS | TF_NAV_DOOR_ALWAYS_BLOCKS | TF_NAV_UNBLOCKABLE | TF_NAV_WITH_SECOND_POINT | TF_NAV_WITH_THIRD_POINT | TF_NAV_WITH_FOURTH_POINT | TF_NAV_WITH_FIFTH_POINT | TF_NAV_RESCUE_CLOSET
 };
 
 class CNavArea;
@@ -93,10 +93,10 @@ class CHidingSpot
 public:
 	enum
 	{
-		IN_COVER          = 0x01, // in a corner with good hard cover nearby
-		GOOD_SNIPER_SPOT  = 0x02, // had at least one decent sniping corridor
+		IN_COVER = 0x01, // in a corner with good hard cover nearby
+		GOOD_SNIPER_SPOT = 0x02, // had at least one decent sniping corridor
 		IDEAL_SNIPER_SPOT = 0x04, // can see either very far, or a large area, or both
-		EXPOSED           = 0x08  // spot in the open, usually on a ledge or cliff
+		EXPOSED = 0x08  // spot in the open, usually on a ledge or cliff
 	};
 
 	bool HasGoodCover() const
@@ -281,10 +281,6 @@ public:
 	Vector GetNearestPoint(const Vector2D vPoint) const
 	{
 		float x, y, z;
-
-		assert(vPoint.x >= 0 && vPoint.y >= 0);
-		assert(m_vNwCorner.x >= 0 && m_vNwCorner.y >= 0);
-		assert(m_vSeCorner.x >= 0 && m_vSeCorner.y >= 0);
 
 		x = FloatSel(vPoint.x - m_vNwCorner.x, vPoint.x, m_vNwCorner.x);
 		x = FloatSel(x - m_vSeCorner.x, m_vSeCorner.x, x);

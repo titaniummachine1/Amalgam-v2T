@@ -1,4 +1,5 @@
 #include "KDTree.h"
+#include <cmath>
 
 static constexpr float BBOX_Z_PADDING = 128.0f;
 
@@ -85,9 +86,44 @@ bool CNavMeshKDTree::IsPointInNavArea(const Vector& vPos, const CNavArea* pArea)
 		return false;
 	if (vPos.y < pArea->m_vNwCorner.y || vPos.y > pArea->m_vSeCorner.y)
 		return false;
-	if (vPos.z < pArea->m_flMinZ || vPos.z > pArea->m_flMaxZ)
+
+	if (pArea->m_flInvDxCorners == 0.0f || pArea->m_flInvDyCorners == 0.0f)
+	{
+		float flDist = vPos.z - pArea->m_flNeZ;
+		return flDist >= -8.0f && flDist <= 82.0f;
+	}
+
+	float dx = pArea->m_vSeCorner.x - pArea->m_vNwCorner.x;
+	float dy = pArea->m_vSeCorner.y - pArea->m_vNwCorner.y;
+	float dz_ne = pArea->m_flNeZ - pArea->m_vNwCorner.z;
+	float dz_sw = pArea->m_flSwZ - pArea->m_vNwCorner.z;
+	float dz_se = pArea->m_vSeCorner.z - pArea->m_vNwCorner.z;
+
+	float u = (vPos.x - pArea->m_vNwCorner.x) * pArea->m_flInvDxCorners;
+	float v = (vPos.y - pArea->m_vNwCorner.y) * pArea->m_flInvDyCorners;
+
+	Vector vNormal;
+	if (u >= v)
+	{
+		vNormal.x = -dz_ne * dy;
+		vNormal.y = dx * (dz_ne - dz_se);
+		vNormal.z = dx * dy;
+	}
+	else
+	{
+		vNormal.x = dy * (dz_sw - dz_se);
+		vNormal.y = -dx * dz_sw;
+		vNormal.z = dx * dy;
+	}
+
+	float flLenSq = vNormal.LengthSqr();
+	if (flLenSq < 1e-6f)
 		return false;
-	return true;
+
+	Vector vToPoint = vPos - pArea->m_vNwCorner;
+	float flDist = vNormal.Dot(vToPoint) / std::sqrt(flLenSq);
+
+	return flDist >= -8.0f && flDist <= 82.0f;
 }
 
 CNavArea* CNavMeshKDTree::FindContainingArea(const Vector& vPos) const

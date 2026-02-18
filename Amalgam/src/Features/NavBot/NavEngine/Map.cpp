@@ -47,7 +47,7 @@ int CMap::Solve(CNavArea* pStart, CNavArea* pEnd, std::vector<void*>* path, floa
 		{
 			// Path Found! Reconstruct.
 			if (cost) *cost = m_vPathNodes[uCurrentIndex].m_g;
-			
+
 			path->clear();
 			CNavArea* pCurrent = pEnd;
 			while (pCurrent)
@@ -75,7 +75,7 @@ int CMap::Solve(CNavArea* pStart, CNavArea* pEnd, std::vector<void*>* path, floa
 		{
 			CNavArea* pNextArea = reinterpret_cast<CNavArea*>(neighbor.state);
 			float flCostToNext = neighbor.cost;
-			
+
 			size_t uNextIndex = pNextArea - &m_navfile.m_vAreas[0];
 			PathNode_t& nextNode = m_vPathNodes[uNextIndex];
 
@@ -95,7 +95,7 @@ int CMap::Solve(CNavArea* pStart, CNavArea* pEnd, std::vector<void*>* path, floa
 				nextNode.m_pParent = pCurrentArea;
 				nextNode.m_g = flNewG;
 				float h = pNextArea->m_vCenter.DistTo(pEnd->m_vCenter);
-				nextNode.m_f = flNewG + h; 
+				nextNode.m_f = flNewG + h;
 
 				if (!nextNode.m_bInOpen)
 				{
@@ -130,8 +130,8 @@ void CMap::AdjacentCost(void* pArea, std::vector<micropather::StateCost>* pAdjac
 	const int iCacheExpirySeconds = std::min(Vars::Misc::Movement::NavEngine::VischeckCacheTime.Value, 45);
 	const int iCacheExpiry = TICKCOUNT_TIMESTAMP(iCacheExpirySeconds);
 
-		auto pLocal = H::Entities.GetLocal();
-		const int iTeam = pLocal ? pLocal->m_iTeamNum() : 0;
+	auto pLocal = H::Entities.GetLocal();
+	const int iTeam = pLocal ? pLocal->m_iTeamNum() : 0;
 	for (NavConnect_t& tConnection : pCurrentArea->m_vConnections)
 	{
 		CNavArea* pNextArea = tConnection.m_pArea;
@@ -164,7 +164,7 @@ void CMap::AdjacentCost(void* pArea, std::vector<micropather::StateCost>* pAdjac
 		}
 
 		const auto tKey = std::pair<CNavArea*, CNavArea*>(pCurrentArea, pNextArea);
-		
+
 		CachedConnection_t& tEntry = m_mVischeckCache[tKey];
 		bool bValidCache = (tEntry.m_iExpireTick == 0 || tEntry.m_iExpireTick > iNow);
 
@@ -298,7 +298,7 @@ void CMap::AdjacentCost(void* pArea, std::vector<micropather::StateCost>* pAdjac
 		}
 
 		pAdjacent->push_back({ reinterpret_cast<void*>(pNextArea), flFinalCost });
-		
+
 		if (tEntry.m_bPassable)
 		{
 			tEntry.m_flCachedCost = flBaseCost;
@@ -369,23 +369,23 @@ DropdownHint_t CMap::HandleDropdown(const Vector& vCurrentPos, const Vector& vNe
 			tHint.m_vAdjustedPos.z = vCurrentPos.z;
 
 			auto GetGroundZ = [&](const Vector& vProbe, float& flGroundZ) -> bool
-			{
-				CTraceFilterNavigation tFilter;
-				CGameTrace tTrace{};
+				{
+					CTraceFilterNavigation tFilter;
+					CGameTrace tTrace{};
 
-				Vector vStart = vProbe;
-				vStart.z += PLAYER_CROUCHED_JUMP_HEIGHT;
+					Vector vStart = vProbe;
+					vStart.z += PLAYER_CROUCHED_JUMP_HEIGHT;
 
-				Vector vEnd = vProbe;
-				vEnd.z -= std::max(flDropDistance + PLAYER_HEIGHT * 1.5f, PLAYER_HEIGHT * 2.f);
+					Vector vEnd = vProbe;
+					vEnd.z -= std::max(flDropDistance + PLAYER_HEIGHT * 1.5f, PLAYER_HEIGHT * 2.f);
 
-				SDK::Trace(vStart, vEnd, MASK_PLAYERSOLID_BRUSHONLY, &tFilter, &tTrace);
-				if (!tTrace.DidHit())
-					return false;
+					SDK::Trace(vStart, vEnd, MASK_PLAYERSOLID_BRUSHONLY, &tFilter, &tTrace);
+					if (!tTrace.DidHit())
+						return false;
 
-				flGroundZ = tTrace.endpos.z;
-				return true;
-			};
+					flGroundZ = tTrace.endpos.z;
+					return true;
+				};
 
 			const float flEdgeSearchStart = std::min(flHorizontalLength * 0.95f, std::max(tHint.m_flApproachDistance, PLAYER_WIDTH * 0.8f));
 			const float flEdgeSearchEnd = std::max(PLAYER_WIDTH * 0.35f, flEdgeSearchStart - std::max(PLAYER_WIDTH * 2.2f, flHorizontalLength * 0.6f));
@@ -703,50 +703,40 @@ void CMap::ApplyBlacklistAround(const Vector& vOrigin, float flRadius, const Bla
 CNavArea* CMap::FindClosestNavArea(const Vector& vPos, bool bLocalOrigin)
 {
 	std::lock_guard lock(m_mutex);
-	float flBestOverlapScore = FLT_MAX;
-	CNavArea* pBestOverlapArea = nullptr;
 
-	float flBestScore = FLT_MAX;
-	CNavArea* pBestArea = nullptr;
+	FindAreaResult tResult = m_kdTree.FindArea(vPos);
+
+	if (tResult.bIsExact)
+		return tResult.pArea;
+
+	if (!bLocalOrigin)
+		return tResult.pArea;
+
+	// bLocalOrigin: among XY-overlapping areas pick the one with best vertical score
+	CNavArea* pBestOverlapArea = nullptr;
+	float flBestOverlapScore = FLT_MAX;
 
 	for (auto& tArea : m_navfile.m_vAreas)
 	{
-		const bool bOverlapping = tArea.IsOverlapping(vPos);
-		const float flAreaZ = tArea.GetZ(vPos.x, vPos.y);
-		const float flVerticalToArea = std::fabs(flAreaZ - vPos.z);
+		if (!tArea.IsOverlapping(vPos))
+			continue;
 
-		if (bOverlapping)
+		const float flVerticalToArea = std::fabs(tArea.GetZ(vPos.x, vPos.y) - vPos.z);
+		float flOverlapScore = flVerticalToArea;
+
+		if (vPos.z < (tArea.m_flMinZ - PLAYER_CROUCHED_JUMP_HEIGHT))
+			flOverlapScore += PLAYER_HEIGHT;
+		if (vPos.z > (tArea.m_flMaxZ + PLAYER_CROUCHED_JUMP_HEIGHT))
+			flOverlapScore += PLAYER_HEIGHT * 0.5f;
+
+		if (flOverlapScore < flBestOverlapScore)
 		{
-			float flOverlapScore = flVerticalToArea;
-			if (bLocalOrigin)
-			{
-				if (vPos.z < (tArea.m_flMinZ - PLAYER_CROUCHED_JUMP_HEIGHT))
-					flOverlapScore += PLAYER_HEIGHT;
-				if (vPos.z > (tArea.m_flMaxZ + PLAYER_CROUCHED_JUMP_HEIGHT))
-					flOverlapScore += PLAYER_HEIGHT * 0.5f;
-			}
-
-			if (flOverlapScore < flBestOverlapScore)
-			{
-				flBestOverlapScore = flOverlapScore;
-				pBestOverlapArea = &tArea;
-			}
-		}
-
-		Vector vDelta = tArea.m_vCenter - vPos;
-		const float flPlanarDistSqr = vDelta.x * vDelta.x + vDelta.y * vDelta.y;
-		const float flScore = flPlanarDistSqr + (flVerticalToArea * flVerticalToArea * 6.f);
-		if (flScore < flBestScore)
-		{
-			flBestScore = flScore;
-			pBestArea = &tArea;
+			flBestOverlapScore = flOverlapScore;
+			pBestOverlapArea = &tArea;
 		}
 	}
 
-	if (pBestOverlapArea)
-		return pBestOverlapArea;
-
-	return pBestArea;
+	return pBestOverlapArea ? pBestOverlapArea : tResult.pArea;
 }
 
 void CMap::UpdateIgnores(CTFPlayer* pLocal)

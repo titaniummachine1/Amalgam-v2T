@@ -1,6 +1,7 @@
 #pragma once
 #include "FileReader/CNavFile.h"
 #include "MicroPather/micropather.h"
+#include "KDTree.h"
 #include <boost/container_hash/hash.hpp>
 #include <limits>
 #include <queue>
@@ -104,11 +105,15 @@ public:
 	CNavFile m_navfile;
 	std::string m_sMapName;
 	NavStateEnum::NavStateEnum m_eState;
+	CNavMeshKDTree m_kdTree;
+
 	CMap(const char* sMapName)
 	{
 		m_navfile = CNavFile(sMapName);
 		m_sMapName = sMapName;
 		m_eState = m_navfile.m_bOK ? NavStateEnum::Active : NavStateEnum::Unavailable;
+		if (m_navfile.m_bOK)
+			m_kdTree.Build(m_navfile.m_vAreas);
 	}
 	// micropather::MicroPather m_pather{ this, 3000, 6, true };
 	std::recursive_mutex m_mutex;
@@ -127,11 +132,11 @@ public:
 
 	std::vector<PathNode_t> m_vPathNodes;
 	uint32_t m_iQueryId = 0;
-	
+
 	int Solve(CNavArea* pStart, CNavArea* pEnd, std::vector<void*>* path, float* cost);
-	
+
 	// legacy
-	float LeastCostEstimate(void* pStartArea, void* pEndArea) override { return 0.0f; } 
+	float LeastCostEstimate(void* pStartArea, void* pEndArea) override { return 0.0f; }
 	void AdjacentCost(void* pArea, std::vector<micropather::StateCost>* pAdjacent) override;
 	void GetDirectNeighbors(CNavArea* pArea, std::vector<micropather::StateCost>& neighbors);
 

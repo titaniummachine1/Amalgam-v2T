@@ -42,15 +42,19 @@ int CNavMeshKDTree::BuildRecursive(CNavArea** ppAreas, int iCount, int iDepth)
 	int iNodeIdx = static_cast<int>(m_vNodes.size());
 	m_vNodes.emplace_back();
 
-	m_vNodes[iNodeIdx].pArea = ppAreas[iMedian];
+	CNavArea* pMedianArea = ppAreas[iMedian];
+	float flSplit = (iAxis == 0)
+		? (pMedianArea->m_vNwCorner.x + pMedianArea->m_vSeCorner.x) * 0.5f
+		: (pMedianArea->m_vNwCorner.y + pMedianArea->m_vSeCorner.y) * 0.5f;
+
+	int iLeft = BuildRecursive(ppAreas, iMedian, iDepth + 1);
+	int iRight = BuildRecursive(ppAreas + iMedian + 1, iCount - iMedian - 1, iDepth + 1);
+
+	m_vNodes[iNodeIdx].pArea = pMedianArea;
 	m_vNodes[iNodeIdx].iAxis = iAxis;
-	m_vNodes[iNodeIdx].flSplitValue = (iAxis == 0)
-		? (ppAreas[iMedian]->m_vNwCorner.x + ppAreas[iMedian]->m_vSeCorner.x) * 0.5f
-		: (ppAreas[iMedian]->m_vNwCorner.y + ppAreas[iMedian]->m_vSeCorner.y) * 0.5f;
-
-	m_vNodes[iNodeIdx].iLeft = BuildRecursive(ppAreas, iMedian, iDepth + 1);
-	m_vNodes[iNodeIdx].iRight = BuildRecursive(ppAreas + iMedian + 1, iCount - iMedian - 1, iDepth + 1);
-
+	m_vNodes[iNodeIdx].flSplitValue = flSplit;
+	m_vNodes[iNodeIdx].iLeft = iLeft;
+	m_vNodes[iNodeIdx].iRight = iRight;
 	m_vNodes[iNodeIdx].bbox = CalculateSubtreeBBox(iNodeIdx);
 
 	return iNodeIdx;

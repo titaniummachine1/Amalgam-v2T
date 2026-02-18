@@ -1,6 +1,5 @@
 #pragma once
 #include <vector>
-#include <memory>
 #include <limits>
 #include <algorithm>
 #include "FileReader/nav.h"
@@ -13,9 +12,8 @@ struct AABB
 	AABB()
 		: min(std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max())
 		, max(-std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max())
-	{}
-
-	AABB(const Vector& min, const Vector& max) : min(min), max(max) {}
+	{
+	}
 
 	void Expand(const AABB& other)
 	{
@@ -30,14 +28,12 @@ struct AABB
 
 struct KDNode
 {
-	CNavArea* pArea;
-	int iAxis;
+	CNavArea* pArea = nullptr;
 	AABB bbox;
-
-	std::unique_ptr<KDNode> pLeft;
-	std::unique_ptr<KDNode> pRight;
-
-	KDNode(CNavArea* pArea, int iAxis) : pArea(pArea), iAxis(iAxis) {}
+	float flSplitValue = 0.0f;
+	int iAxis = 0;
+	int iLeft = -1;
+	int iRight = -1;
 };
 
 struct FindAreaResult
@@ -49,21 +45,23 @@ struct FindAreaResult
 class CNavMeshKDTree
 {
 public:
-	void Build(std::vector<CNavArea*>& vAreas);
+	void Build(std::vector<CNavArea>& vAreas);
 
 	CNavArea* FindContainingArea(const Vector& vPos) const;
 	CNavArea* FindClosestArea(const Vector& vPos) const;
 	FindAreaResult FindArea(const Vector& vPos) const;
 
 private:
-	std::unique_ptr<KDNode> m_pRoot;
+	std::vector<KDNode> m_vNodes;
+	int m_iRoot = -1;
 
-	std::unique_ptr<KDNode> BuildRecursive(std::vector<CNavArea*>& vAreas, int iDepth);
-	AABB CalculateConservativeBBox(const CNavArea* pArea) const;
-	AABB CalculateSubtreeBBox(const KDNode* pNode) const;
+	int BuildRecursive(CNavArea** ppAreas, int iCount, int iDepth);
 
-	CNavArea* FindContainingRecursive(const KDNode* pNode, const Vector& vPos) const;
-	void FindClosestRecursive(const KDNode* pNode, const Vector& vPos, CNavArea*& pBestArea, float& flBestDistSq) const;
+	AABB CalculateAreaBBox(const CNavArea* pArea) const;
+	AABB CalculateSubtreeBBox(int iNode) const;
+
+	CNavArea* FindContainingRecursive(int iNode, const Vector& vPos) const;
+	void FindClosestRecursive(int iNode, const Vector& vPos, CNavArea*& pBestArea, float& flBestDistSq) const;
 
 	static bool IsPointInNavArea(const Vector& vPos, const CNavArea* pArea);
 	static bool IsPointInAABB(const Vector& vPos, const AABB& bbox);

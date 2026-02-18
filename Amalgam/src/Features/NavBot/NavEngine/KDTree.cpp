@@ -61,11 +61,14 @@ AABB CNavMeshKDTree::CalculateAreaBBox(const CNavArea* pArea) const
 	AABB bbox;
 	bbox.min.x = pArea->m_vNwCorner.x;
 	bbox.min.y = pArea->m_vNwCorner.y;
-	bbox.min.z = pArea->m_flMinZ - BBOX_Z_BELOW;
-
 	bbox.max.x = pArea->m_vSeCorner.x;
 	bbox.max.y = pArea->m_vSeCorner.y;
-	bbox.max.z = pArea->m_flMaxZ + BBOX_Z_ABOVE;
+
+	float flTrueMinZ = std::min({ pArea->m_vNwCorner.z, pArea->m_vSeCorner.z, pArea->m_flNeZ, pArea->m_flSwZ });
+	float flTrueMaxZ = std::max({ pArea->m_vNwCorner.z, pArea->m_vSeCorner.z, pArea->m_flNeZ, pArea->m_flSwZ });
+
+	bbox.min.z = flTrueMinZ - BBOX_Z_BELOW;
+	bbox.max.z = flTrueMaxZ + BBOX_Z_ABOVE;
 
 	return bbox;
 }

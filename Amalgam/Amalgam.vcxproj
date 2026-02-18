@@ -1138,6 +1138,7 @@
     <ClCompile Include="src\Features\NavBot\NavEngine\Controllers\DoomsdayController\DoomsdayController.cpp" />
     <ClCompile Include="src\Features\NavBot\NavEngine\Controllers\PLController\PLController.cpp" />
     <ClCompile Include="src\Features\NavBot\NavEngine\MicroPather\micropather.cpp" />
+    <ClCompile Include="src\Features\NavBot\NavEngine\KDTree.cpp" />
     <ClCompile Include="src\Features\NavBot\NavEngine\NavEngine.cpp" />
     <ClCompile Include="src\Features\NavBot\NavEngine\Map.cpp" />
     <ClCompile Include="src\Features\Output\Output.cpp" />
@@ -1483,6 +1484,7 @@
     <ClInclude Include="src\Features\NavBot\NavEngine\FileReader\CNavFile.h" />
     <ClInclude Include="src\Features\NavBot\NavEngine\FileReader\nav.h" />
     <ClInclude Include="src\Features\NavBot\NavEngine\MicroPather\micropather.h" />
+    <ClInclude Include="src\Features\NavBot\NavEngine\KDTree.h" />
     <ClInclude Include="src\Features\NavBot\NavEngine\NavEngine.h" />
     <ClInclude Include="src\Features\NavBot\NavEngine\Map.h" />
     <ClInclude Include="src\Features\Output\Output.h" />

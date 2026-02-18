@@ -1,7 +1,8 @@
 #include "KDTree.h"
 #include <cmath>
 
-static constexpr float BBOX_Z_PADDING = 128.0f;
+static constexpr float BBOX_Z_BELOW = 8.0f;
+static constexpr float BBOX_Z_ABOVE = 82.0f;
 
 void CNavMeshKDTree::Build(std::vector<CNavArea>& vAreas)
 {
@@ -60,11 +61,11 @@ AABB CNavMeshKDTree::CalculateAreaBBox(const CNavArea* pArea) const
 	AABB bbox;
 	bbox.min.x = pArea->m_vNwCorner.x;
 	bbox.min.y = pArea->m_vNwCorner.y;
-	bbox.min.z = pArea->m_flMinZ - BBOX_Z_PADDING;
+	bbox.min.z = pArea->m_flMinZ - BBOX_Z_BELOW;
 
 	bbox.max.x = pArea->m_vSeCorner.x;
 	bbox.max.y = pArea->m_vSeCorner.y;
-	bbox.max.z = pArea->m_flMaxZ + BBOX_Z_PADDING;
+	bbox.max.z = pArea->m_flMaxZ + BBOX_Z_ABOVE;
 
 	return bbox;
 }

@@ -702,9 +702,6 @@ void CMap::ApplyBlacklistAround(const Vector& vOrigin, float flRadius, const Bla
 
 CNavArea* CMap::FindClosestNavArea(const Vector& vPos, bool bLocalOrigin)
 {
-	if (m_kdTreeBuildFuture.valid())
-		m_kdTreeBuildFuture.get();
-
 	std::lock_guard lock(m_mutex);
 
 	FindAreaResult tResult = m_kdTree.FindArea(vPos);

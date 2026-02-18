@@ -119,9 +119,9 @@ bool CNavMeshKDTree::IsPointInNavArea(const Vector& vPos, const CNavArea* pArea)
 	}
 	else
 	{
-		vNormal.x = dy * (dz_sw - dz_se);
-		vNormal.y = -dx * dz_sw;
-		vNormal.z = dx * dy;
+		vNormal.x = dy * (dz_se - dz_sw);
+		vNormal.y = dx * dz_sw;
+		vNormal.z = -dx * dy;
 	}
 
 	float flLenSq = vNormal.LengthSqr();
@@ -185,7 +185,11 @@ void CNavMeshKDTree::FindClosestRecursive(int iNode, const Vector& vPos, CNavAre
 	if (flMinDistSq >= flBestDistSq)
 		return;
 
-	float flDistSq = vPos.DistToSqr(node.pArea->m_vCenter);
+	const Vector& vCenter = node.pArea->m_vCenter;
+	const float flAreaZ = node.pArea->GetZ(vPos.x, vPos.y);
+	const float flVertical = std::fabs(flAreaZ - vPos.z);
+	const float flPlanarSq = (vPos.x - vCenter.x) * (vPos.x - vCenter.x) + (vPos.y - vCenter.y) * (vPos.y - vCenter.y);
+	const float flDistSq = flPlanarSq + flVertical * flVertical * 6.f;
 	if (flDistSq < flBestDistSq)
 	{
 		flBestDistSq = flDistSq;

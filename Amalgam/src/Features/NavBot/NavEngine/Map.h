@@ -7,7 +7,6 @@
 #include <queue>
 #include <unordered_set>
 #include <mutex>
-#include <future>
 
 #define PLAYER_WIDTH		49.0f
 #define HALF_PLAYER_WIDTH	PLAYER_WIDTH / 2.0f
@@ -107,7 +106,6 @@ public:
 	std::string m_sMapName;
 	NavStateEnum::NavStateEnum m_eState;
 	CNavMeshKDTree m_kdTree;
-	std::future<void> m_kdTreeBuildFuture;
 
 	CMap(const char* sMapName)
 	{
@@ -115,7 +113,7 @@ public:
 		m_sMapName = sMapName;
 		m_eState = m_navfile.m_bOK ? NavStateEnum::Active : NavStateEnum::Unavailable;
 		if (m_navfile.m_bOK)
-			m_kdTreeBuildFuture = std::async(std::launch::async, [this]() { m_kdTree.Build(m_navfile.m_vAreas); });
+			m_kdTree.Build(m_navfile.m_vAreas);
 	}
 	// micropather::MicroPather m_pather{ this, 3000, 6, true };
 	std::recursive_mutex m_mutex;

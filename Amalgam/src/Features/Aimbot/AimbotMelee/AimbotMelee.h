@@ -21,6 +21,8 @@ private:
 	float m_flRange = 0.f;
 	bool m_bShouldSwing = false;
 	int m_iDoubletapTicks = 0;
+	bool m_bChargeReachPending = false;
+	Vec3 m_vChargeReachDir = {};
 
 	std::unordered_map<int, std::deque<TickRecord>> m_mRecordMap;
 	std::unordered_map<int, std::vector<Vec3>> m_mPaths;

@@ -39,7 +39,7 @@ bool GetHaarpCapturePos(int iLocalTeam, Vector& vOut)
 			if (!F::NavEngine.IsNavMeshLoaded())
 				return vPos;
 
-			CNavArea* pArea = F::NavEngine.FindClosestNavArea(vPos, false);
+			CNavArea* pArea = F::NavEngine.FindClosestNavArea(vPos);
 			if (!pArea)
 				return vPos;
 
@@ -175,7 +175,7 @@ bool CHaarpController::GetCapturePos(Vector& vOut)
 	Vector vGoalPos = vCapturePos;
 	if (F::NavEngine.IsNavMeshLoaded())
 	{
-		CNavArea* pArea = F::NavEngine.FindClosestNavArea(vCapturePos, false);
+		CNavArea* pArea = F::NavEngine.FindClosestNavArea(vCapturePos);
 		if (pArea)
 		{
 			Vector vCenter = pArea->m_vCenter;

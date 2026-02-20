@@ -25,7 +25,7 @@ bool GetDoomsdayCapturePos(int iLocalTeam, Vector& vOut)
 			if (!F::NavEngine.IsNavMeshLoaded())
 				return vPos;
 
-			CNavArea* pArea = F::NavEngine.FindClosestNavArea(vPos, false);
+			CNavArea* pArea = F::NavEngine.FindClosestNavArea(vPos);
 			if (!pArea)
 				return vPos;
 

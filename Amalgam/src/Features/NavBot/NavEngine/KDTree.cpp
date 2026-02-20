@@ -1,6 +1,7 @@
 #include "KDTree.h"
 #include <cmath>
 #include <stack>
+#include "../../../SDK/Definitions/Types.h"
 
 static constexpr float BBOX_Z_BELOW = 8.0f;
 static constexpr float BBOX_Z_ABOVE = 82.0f;

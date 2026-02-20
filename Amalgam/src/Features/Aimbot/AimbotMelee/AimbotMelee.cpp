@@ -1,6 +1,7 @@
 #include "AimbotMelee.h"
 
 #include "../Aimbot.h"
+#include "../../CritHack/CritHack.h"
 #include "../../Simulation/MovementSimulation/MovementSimulation.h"
 #include "../../EnginePrediction/EnginePrediction.h"
 #include "../../Ticks/Ticks.h"
@@ -274,6 +275,15 @@ void CAimbotMelee::UpdateInfo(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCm
 	}
 
 	m_bShouldSwing = m_iDoubletapTicks <= iSwingTicks || Vars::Doubletap::AntiWarp.Value && pLocal->m_hGroundEntity();
+
+	// Extend melee range to charge-reach distance when Demoman has full charge and exploit is ready
+	if (Vars::Aimbot::Melee::ChargeReach.Value &&
+		pLocal->m_iClass() == TF_CLASS_DEMOMAN &&
+		pLocal->m_flChargeMeter() >= 100.f &&
+		!pLocal->InCond(TF_COND_SHIELD_CHARGE))
+	{
+		m_flRange = 128.f;
+	}
 }
 
 bool CAimbotMelee::CanBackstab(CBaseEntity* pTarget, CTFPlayer* pLocal, Vec3 vEyeAngles)
@@ -615,6 +625,35 @@ static inline void DrawVisuals(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserC
 
 void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 {
+	// Charge reach follow-up: fires IN_ATTACK2 at the right moment (2-3 tick jitter window before smack)
+	// Runs before all early returns so the charge still fires even if the target leaves range mid-swing
+	if (m_bChargeReachPending && Vars::Aimbot::Melee::ChargeReach.Value)
+	{
+		if (pLocal->InCond(TF_COND_SHIELD_CHARGE) || pLocal->m_flChargeMeter() < 99.f)
+		{
+			// Charge already active or meter was used - nothing left to do
+			m_bChargeReachPending = false;
+		}
+		else if (pWeapon->m_flSmackTime() > 0.f)
+		{
+			// Mid-swing: fire charge within a 3-tick jitter window before the smack lands
+			// The 3-tick window ensures doubletap compressed timing and lag spikes don't cause misses
+			const float flTimeToSmack = pWeapon->m_flSmackTime() - I::GlobalVars->curtime;
+			if (flTimeToSmack <= TICK_INTERVAL * 3.f)
+			{
+				pCmd->viewangles = m_vChargeReachDir;
+				pCmd->buttons |= IN_ATTACK2;
+				if (flTimeToSmack <= 0.f)
+					m_bChargeReachPending = false;
+			}
+		}
+		else
+		{
+			// Smack time went negative without the charge being triggered - swing was cancelled
+			m_bChargeReachPending = false;
+		}
+	}
+
 	static int iStaticAimType = Vars::Aimbot::General::AimType.Value;
 	const int iLastAimType = iStaticAimType;
 	const int iRealAimType = Vars::Aimbot::General::AimType.Value;
@@ -637,7 +676,33 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 
 	auto vTargets = F::AimbotGlobal.ManageTargets(GetTargets, pLocal, pWeapon, Vars::Aimbot::General::TargetSelectionEnum::Distance);
 	if (vTargets.empty())
+	{
+		// Auto crit refill: when no targets exist and we are far enough from all enemies, swing into air
+		// to fill the crit token bucket up to the configured number of available crits
+		if (Vars::Aimbot::Melee::CritRefill.Value && G::CanPrimaryAttack && pWeapon->m_flSmackTime() < 0.f)
+		{
+			bool bSafeToRefill = true;
+			for (auto pEntity : H::Entities.GetGroup(EntityEnum::PlayerEnemy))
+				{
+					auto pPlayer = pEntity->As<CTFPlayer>();
+					if (!pPlayer->IsAlive() || pEntity->IsDormant()) continue;
+					if (pLocal->GetAbsOrigin().DistTo(pEntity->GetAbsOrigin()) < 500.f)
+				{
+					bSafeToRefill = false;
+					break;
+				}
+			}
+			if (bSafeToRefill && F::CritHack.GetAvailableCrits() < Vars::Aimbot::Melee::CritRefillAmount.Value)
+			{
+				F::CritHack.m_bCritRefillActive = true;
+				pCmd->buttons |= IN_ATTACK;
+				return;
+			}
+		}
+		F::CritHack.m_bCritRefillActive = false;
 		return;
+	}
+	F::CritHack.m_bCritRefillActive = false;
 
 	//if (!G::AimTarget.m_iEntIndex)
 	//	G::AimTarget = { vTargets.front().m_pEntity->entindex(), I::GlobalVars->tickcount, 0 };
@@ -668,6 +733,20 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 
 		if (G::Attacking = SDK::IsAttacking(pLocal, pWeapon, pCmd, true))
 			F::Aimbot.m_eRanType = EWeaponType::MELEE;
+
+		// Arm charge reach: when we fire and Demoman has full charge, schedule IN_ATTACK2
+		// at the right moment (handled at top of Run each tick by m_bChargeReachPending)
+		if (G::Attacking && Vars::Aimbot::Melee::ChargeReach.Value &&
+			pLocal->m_iClass() == TF_CLASS_DEMOMAN &&
+			pLocal->m_flChargeMeter() >= 100.f &&
+			!pLocal->InCond(TF_COND_SHIELD_CHARGE) &&
+			!m_bChargeReachPending)
+		{
+			m_bChargeReachPending = true;
+			m_vChargeReachDir = tTarget.m_vAngleTo;
+			Math::ClampAngles(m_vChargeReachDir);
+		}
+
 		if (G::Attacking == 1)
 		{
 			if (tTarget.m_bBacktrack)

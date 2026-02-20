@@ -340,8 +340,7 @@ void CMenu::MenuAimbot(int iTab)
 					FToggle(Vars::CritHack::ForceCrits, FToggleEnum::Right);
 					FToggle(Vars::Aimbot::General::PrioritizeNavbot, FToggleEnum::Left);
 					FToggle(Vars::Aimbot::General::PrioritizeFollowbot, FToggleEnum::Right);
-					FToggle(Vars::CritHack::AvoidRandomCrits, FToggleEnum::Left);
-					FToggle(Vars::CritHack::AlwaysMeleeCrit, FToggleEnum::Right);
+					FToggle(Vars::CritHack::AvoidRandomCrits);
 				} EndSection();
 				if (Vars::Debug::Options.Value)
 				{
@@ -501,6 +500,14 @@ void CMenu::MenuAimbot(int iTab)
 					FToggle(Vars::Aimbot::Melee::IgnoreRazorback, FToggleEnum::Right);
 					FToggle(Vars::Aimbot::Melee::SwingPrediction, FToggleEnum::Left);
 					FToggle(Vars::Aimbot::Melee::WhipTeam, FToggleEnum::Right);
+					FToggle(Vars::CritHack::AlwaysMeleeCrit, FToggleEnum::Left);
+					FToggle(Vars::Aimbot::Melee::ChargeReach, FToggleEnum::Right);
+					FToggle(Vars::Aimbot::Melee::CritRefill, FToggleEnum::Left);
+					PushTransparent(!Vars::Aimbot::Melee::CritRefill.Value);
+					{
+						FSlider(Vars::Aimbot::Melee::CritRefillAmount, FSliderEnum::Right);
+					}
+					PopTransparent();
 				} EndSection();
 				if (Vars::Debug::Options.Value)
 				{

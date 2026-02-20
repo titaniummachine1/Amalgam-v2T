@@ -309,7 +309,7 @@ int CCritHack::GetCritRequest(CUserCmd* pCmd, CTFWeaponBase* pWeapon)
 			bPressed = true;
 	}
 
-	bool bSkip = Vars::CritHack::AvoidRandomCrits.Value;
+	bool bSkip = Vars::CritHack::AvoidRandomCrits.Value || m_bCritRefillActive;
 	bool bDesync = CommandToSeed(pCmd->command_number) == pWeapon->m_iCurrentSeed();
 
 	return bCanCrit && bPressed ? CritRequestEnum::Crit : bSkip || bDesync ? CritRequestEnum::Skip : CritRequestEnum::Any;

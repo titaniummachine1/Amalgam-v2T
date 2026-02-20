@@ -982,7 +982,7 @@ void CBotUtils::AutoScope(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* p
 		bool bResult = false;
 		Vector vPredictedPos = bSimple ? pEnemy->GetAbsOrigin() + pEnemy->GetAbsVelocity() * TICKS_TO_TIME(iMaxTicks) : tStorage.m_vPredictedOrigin;
 
-		auto pTargetNav = F::NavEngine.FindClosestNavArea(vPredictedPos, false);
+		auto pTargetNav = F::NavEngine.FindClosestNavArea(vPredictedPos);
 		if (pTargetNav)
 		{
 			Vector vTo = pTargetNav->m_vCenter;

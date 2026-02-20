@@ -468,6 +468,202 @@ bool CNavEngine::SaveCrumbCache() const
 	return true;
 }
 
+// ── Portal / SSFA helpers ────────────────────────────────────────────────────
+
+struct NavPortal_t
+{
+	Vector    vLeft{};
+	Vector    vRight{};
+	bool      bForced{};        // width < 48u → must walk center
+	bool      bDrop{};
+	float     flDropHeight{};
+	float     flApproachDist{};
+	Vector    vApproachDir{};
+	CNavArea* pArea{};
+};
+
+// Compute the inset portal for a connection A→B.
+// vLeft/vRight are the endpoints on A's shared boundary, projected to navmesh surface.
+// If shared boundary < 48u, bForced=true and vLeft==vRight==center.
+static bool ComputePortal(CNavArea* pFrom, CNavArea* pTo, NavPortal_t& tOut)
+{
+	constexpr float kInset = 24.f;
+
+	const float minXA = pFrom->m_vNwCorner.x, maxXA = pFrom->m_vSeCorner.x;
+	const float minYA = pFrom->m_vNwCorner.y, maxYA = pFrom->m_vSeCorner.y;
+	const float minXB = pTo->m_vNwCorner.x,   maxXB = pTo->m_vSeCorner.x;
+	const float minYB = pTo->m_vNwCorner.y,   maxYB = pTo->m_vSeCorner.y;
+
+	for (int iDir = 0; iDir < 4; iDir++)
+	{
+		bool bFound = false;
+		for (const auto& conn : pFrom->m_vConnectionsDir[iDir])
+			if (conn.m_pArea == pTo) { bFound = true; break; }
+		if (!bFound)
+			continue;
+
+		const bool bAxisX = (iDir == 0 || iDir == 2);
+		float oMin, oMax;
+		if (bAxisX) { oMin = std::max(minXA, minXB); oMax = std::min(maxXA, maxXB); }
+		else        { oMin = std::max(minYA, minYB); oMax = std::min(maxYA, maxYB); }
+
+		// Edge coordinate of the shared boundary on A
+		float flEdge;
+		if      (iDir == 0) flEdge = minYA;
+		else if (iDir == 1) flEdge = maxXA;
+		else if (iDir == 2) flEdge = maxYA;
+		else                flEdge = minXA;
+
+		const float flInsetMin = oMin + kInset;
+		const float flInsetMax = oMax - kInset;
+
+		tOut.pArea = pTo;
+		if (flInsetMax < flInsetMin)
+		{
+			// Narrower than 48u: forced center
+			const float flMid = (oMin + oMax) * 0.5f;
+			tOut.bForced = true;
+			if (bAxisX) { tOut.vLeft = { flMid, flEdge, pFrom->GetZ(flMid, flEdge) }; }
+			else        { tOut.vLeft = { flEdge, flMid, pFrom->GetZ(flEdge, flMid) }; }
+			tOut.vRight = tOut.vLeft;
+		}
+		else
+		{
+			tOut.bForced = false;
+			if (bAxisX)
+			{
+				tOut.vLeft  = { flInsetMin, flEdge, pFrom->GetZ(flInsetMin, flEdge) };
+				tOut.vRight = { flInsetMax, flEdge, pFrom->GetZ(flInsetMax, flEdge) };
+			}
+			else
+			{
+				tOut.vLeft  = { flEdge, flInsetMin, pFrom->GetZ(flEdge, flInsetMin) };
+				tOut.vRight = { flEdge, flInsetMax, pFrom->GetZ(flEdge, flInsetMax) };
+			}
+		}
+		return true;
+	}
+	return false;
+}
+
+// Signed 2D area of triangle ABC in XY plane (positive = CCW)
+static float TriArea2D(const Vector& a, const Vector& b, const Vector& c)
+{
+	return (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
+}
+
+// Simple Stupid Funnel Algorithm over a sequence of portals.
+// Portals with bForced=true are emitted as mandatory waypoints and restart the funnel.
+// All waypoint Z values come from the portal endpoints (already on navmesh surface via GetZ).
+static std::vector<Crumb_t> RunSSFA(
+	const Vector& vStart, const Vector& vGoal,
+	const std::vector<NavPortal_t>& vPortals)
+{
+	std::vector<Crumb_t> vOut;
+	if (vPortals.empty())
+	{
+		Crumb_t c{}; c.m_vPos = vGoal;
+		vOut.push_back(c);
+		return vOut;
+	}
+
+	auto Emit = [&](const Vector& vPos, CNavArea* pArea, const NavPortal_t* pPortal = nullptr)
+	{
+		if (!vOut.empty() && vOut.back().m_vPos.DistToSqr(vPos) < 1.f)
+			return;
+		Crumb_t c{};
+		c.m_vPos     = vPos;
+		c.m_pNavArea = pArea;
+		if (pPortal && pPortal->bDrop)
+		{
+			c.m_bRequiresDrop    = true;
+			c.m_flDropHeight     = pPortal->flDropHeight;
+			c.m_flApproachDistance = pPortal->flApproachDist;
+			c.m_vApproachDir     = pPortal->vApproachDir;
+		}
+		vOut.push_back(c);
+	};
+
+	// Initialize funnel as degenerate point at start so portal[0] is handled uniformly
+	Vector vApex   = vStart;
+	Vector vFLeft  = vStart;
+	Vector vFRight = vStart;
+	int iApexIdx   = -1;
+	int iLeftIdx   = -1;
+	int iRightIdx  = -1;
+
+	const int n = (int)vPortals.size();
+
+	for (int i = 0; i <= n; i++)
+	{
+		const Vector& vNewLeft  = (i < n) ? vPortals[i].vLeft  : vGoal;
+		const Vector& vNewRight = (i < n) ? vPortals[i].vRight : vGoal;
+		CNavArea* pNewArea      = (i < n) ? vPortals[i].pArea  : vPortals[n - 1].pArea;
+		const NavPortal_t* pNewPortal = (i < n) ? &vPortals[i] : nullptr;
+
+		// Forced portal (narrow choke or drop): emit center directly, restart funnel
+		if (i < n && vPortals[i].bForced)
+		{
+			Emit(vNewLeft, pNewArea, pNewPortal);
+			vApex   = vNewLeft;
+			vFLeft  = vNewLeft;
+			vFRight = vNewLeft;
+			iApexIdx = iLeftIdx = iRightIdx = i;
+			continue;
+		}
+
+		// Update right side of funnel
+		if (TriArea2D(vApex, vFRight, vNewRight) <= 0.f)
+		{
+			if (vApex == vFRight || TriArea2D(vApex, vFLeft, vNewRight) > 0.f)
+			{
+				vFRight   = vNewRight;
+				iRightIdx = i;
+			}
+			else
+			{
+				// Right crossed left → emit left, restart
+				Emit(vFLeft, (iLeftIdx >= 0 && iLeftIdx < n) ? vPortals[iLeftIdx].pArea : pNewArea,
+				     (iLeftIdx >= 0 && iLeftIdx < n) ? &vPortals[iLeftIdx] : nullptr);
+				vApex   = vFLeft;
+				iApexIdx = iLeftIdx;
+				vFLeft  = vApex; vFRight = vApex;
+				iLeftIdx = iRightIdx = iApexIdx;
+				i = (iApexIdx >= 0) ? iApexIdx : 0;
+				continue;
+			}
+		}
+
+		// Update left side of funnel
+		if (TriArea2D(vApex, vFLeft, vNewLeft) >= 0.f)
+		{
+			if (vApex == vFLeft || TriArea2D(vApex, vFRight, vNewLeft) < 0.f)
+			{
+				vFLeft   = vNewLeft;
+				iLeftIdx = i;
+			}
+			else
+			{
+				// Left crossed right → emit right, restart
+				Emit(vFRight, (iRightIdx >= 0 && iRightIdx < n) ? vPortals[iRightIdx].pArea : pNewArea,
+				     (iRightIdx >= 0 && iRightIdx < n) ? &vPortals[iRightIdx] : nullptr);
+				vApex   = vFRight;
+				iApexIdx = iRightIdx;
+				vFLeft  = vApex; vFRight = vApex;
+				iLeftIdx = iRightIdx = iApexIdx;
+				i = (iApexIdx >= 0) ? iApexIdx : 0;
+				continue;
+			}
+		}
+	}
+
+	// Final destination
+	Emit(vGoal, vPortals[n - 1].pArea);
+	return vOut;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 std::vector<CachedCrumb_t> CNavEngine::BuildConnectionCacheEntry(CNavArea* pArea, CNavArea* pNextArea)
 {
 	if (!pArea || !pNextArea || !m_pMap)
@@ -736,37 +932,56 @@ bool CNavEngine::NavTo(const Vector& vDestination, PriorityListEnum::PriorityLis
 	}
 	else
 	{
-		for (size_t i = 0; i < vPath.size(); i++)
+		// Build portal list then run SSFA to get string-pulled waypoints
+		std::vector<NavPortal_t> vPortals;
+		vPortals.reserve(vPath.size());
+
+		for (size_t i = 0; i + 1 < vPath.size(); i++)
 		{
-			auto pArea = reinterpret_cast<CNavArea*>(vPath.at(i));
-			if (!pArea)
+			auto pArea     = reinterpret_cast<CNavArea*>(vPath.at(i));
+			auto pNextArea = reinterpret_cast<CNavArea*>(vPath.at(i + 1));
+			if (!pArea || !pNextArea)
 				continue;
 
-			// All entries besides the last need an extra crumb
-			if (i != vPath.size() - 1)
+			const bool bIsOneWay     = m_pMap->IsOneWay(pArea, pNextArea);
+			NavPoints_t   tPoints    = m_pMap->DeterminePoints(pArea, pNextArea, bIsOneWay);
+			DropdownHint_t tDropdown = m_pMap->HandleDropdown(tPoints.m_vCenter, tPoints.m_vNext, bIsOneWay);
+
+			NavPortal_t tPortal{};
+			if (!ComputePortal(pArea, pNextArea, tPortal))
 			{
-				auto pNextArea = reinterpret_cast<CNavArea*>(vPath.at(i + 1));
-				if (const auto* pCached = FindConnectionCacheEntry(pArea, pNextArea); pCached && !pCached->empty())
-					AppendCachedCrumbs(pArea, *pCached);
-				else
-				{
-					auto vGenerated = BuildConnectionCacheEntry(pArea, pNextArea);
-					if (!vGenerated.empty())
-					{
-						auto& vStored = m_mConnectionCrumbCache[MakeConnectionKey(pArea->m_uId, pNextArea->m_uId)];
-						vStored = std::move(vGenerated);
-						m_bCrumbCacheDirty = true;
-						AppendCachedCrumbs(pArea, vStored);
-					}
-				}
+				// Fallback: use old center as forced single-point portal
+				tPortal.bForced = true;
+				tPortal.vLeft   = tDropdown.m_vAdjustedPos;
+				tPortal.vRight  = tDropdown.m_vAdjustedPos;
+				tPortal.pArea   = pNextArea;
 			}
-			else
+
+			// Drops must be walked through precisely
+			if (tDropdown.m_bRequiresDrop)
 			{
-				Crumb_t tEndCrumb = {};
-				tEndCrumb.m_pNavArea = pArea;
-				tEndCrumb.m_vPos = vDestination;
-				m_vCrumbs.push_back(tEndCrumb);
+				tPortal.bForced = true;
+				tPortal.vLeft   = tDropdown.m_vAdjustedPos;
+				tPortal.vRight  = tDropdown.m_vAdjustedPos;
 			}
+			tPortal.bDrop          = tDropdown.m_bRequiresDrop;
+			tPortal.flDropHeight   = tDropdown.m_flDropHeight;
+			tPortal.flApproachDist = tDropdown.m_flApproachDistance;
+			tPortal.vApproachDir   = tDropdown.m_vApproachDir;
+
+			vPortals.push_back(tPortal);
+		}
+
+		// Player start position for funnel apex
+		Vector vSSFAStart = reinterpret_cast<CNavArea*>(vPath.front())->m_vCenter;
+		if (auto pLP = H::Entities.GetLocal(); pLP && pLP->IsAlive())
+			vSSFAStart = pLP->GetAbsOrigin();
+
+		for (auto& tCrumb : RunSSFA(vSSFAStart, vDestination, vPortals))
+		{
+			if (!m_vCrumbs.empty() && m_vCrumbs.back().m_vPos.DistToSqr(tCrumb.m_vPos) < 1.f)
+				continue;
+			m_vCrumbs.push_back(tCrumb);
 		}
 	}
 
@@ -2146,10 +2361,10 @@ void CNavEngine::Render()
 					H::Draw.RenderTriangle(p0, p1, p2, cWallCorner, false);
 					H::Draw.RenderTriangle(p0, p2, p1, cWallCorner, false);
 				};
-				if (!isCovered(0, minX) || !isCovered(3, minY)) DrawCornerTri(vNw,  1.f,  1.f);
-				if (!isCovered(0, maxX) || !isCovered(1, minY)) DrawCornerTri(vNe, -1.f,  1.f);
-				if (!isCovered(2, minX) || !isCovered(3, maxY)) DrawCornerTri(vSw,  1.f, -1.f);
-				if (!isCovered(2, maxX) || !isCovered(1, maxY)) DrawCornerTri(vSe, -1.f, -1.f);
+				if (!isCovered(0, minX) || !isCovered(3, minY)) DrawCornerTri(vNw, -1.f, -1.f);
+				if (!isCovered(0, maxX) || !isCovered(1, minY)) DrawCornerTri(vNe,  1.f, -1.f);
+				if (!isCovered(2, minX) || !isCovered(3, maxY)) DrawCornerTri(vSw, -1.f,  1.f);
+				if (!isCovered(2, maxX) || !isCovered(1, maxY)) DrawCornerTri(vSe,  1.f,  1.f);
 			}
 		}
 	}

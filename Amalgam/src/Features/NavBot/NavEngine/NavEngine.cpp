@@ -2325,10 +2325,10 @@ void CNavEngine::Render()
 					H::Draw.RenderTriangle(p0, p1, p2, cWallCorner, false);
 					H::Draw.RenderTriangle(p0, p2, p1, cWallCorner, false);
 				};
-				if ((!isCovered(0, minX) && !isCovered(3, minY)) && !isCornerCovered2D(vNw)) DrawCornerTri(vNw,  1.f,  1.f);
-				if ((!isCovered(0, maxX) && !isCovered(1, minY)) && !isCornerCovered2D(vNe)) DrawCornerTri(vNe, -1.f,  1.f);
-				if ((!isCovered(2, minX) && !isCovered(3, maxY)) && !isCornerCovered2D(vSw)) DrawCornerTri(vSw,  1.f, -1.f);
-				if ((!isCovered(2, maxX) && !isCovered(1, maxY)) && !isCornerCovered2D(vSe)) DrawCornerTri(vSe, -1.f, -1.f);
+				if ((!isCovered(0, minX) || !isCovered(3, minY)) && !isCornerCovered2D(vNw)) DrawCornerTri(vNw,  1.f,  1.f);
+				if ((!isCovered(0, maxX) || !isCovered(1, minY)) && !isCornerCovered2D(vNe)) DrawCornerTri(vNe, -1.f,  1.f);
+				if ((!isCovered(2, minX) || !isCovered(3, maxY)) && !isCornerCovered2D(vSw)) DrawCornerTri(vSw,  1.f, -1.f);
+				if ((!isCovered(2, maxX) || !isCovered(1, maxY)) && !isCornerCovered2D(vSe)) DrawCornerTri(vSe, -1.f, -1.f);
 			}
 			// Draw portals (shared X/Y overlap on A's edge, Z interpolated)
 			if (bDrawPortals && cPortal.a)

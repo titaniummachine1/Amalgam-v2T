@@ -573,6 +573,7 @@ static std::vector<Crumb_t> RunSSFA(
 	if (vPortals.empty())
 	{
 		Crumb_t c{}; c.m_vPos = vGoal;
+		c.m_vPos.z = vPortals.empty() ? vGoal.z : vPortals.back().pArea->GetZ(vGoal.x, vGoal.y);
 		vOut.push_back(c);
 		return vOut;
 	}
@@ -583,6 +584,9 @@ static std::vector<Crumb_t> RunSSFA(
 			return;
 		Crumb_t c{};
 		c.m_vPos     = vPos;
+		// Re-project Z onto the nav area surface so the waypoint is on the mesh, not mid-air
+		if (pArea)
+			c.m_vPos.z = pArea->GetZ(vPos.x, vPos.y);
 		c.m_pNavArea = pArea;
 		if (pPortal && pPortal->bDrop)
 		{
@@ -1117,6 +1121,106 @@ CNavArea* CNavEngine::GetLocalNavArea(const Vector& pLocalOrigin)
 	return m_pLocalArea;
 }
 
+// Navmesh-aware segment passability check.
+// Marches the ray from vFrom toward vTo in XY, crossing area boundaries by finding
+// the neighbor that the original ray direction enters (no direction change on crossing).
+// Falls back to a single hull trace only if the ray leaves the navmesh entirely.
+// Returns true if the segment is clear of solid world geometry.
+static bool IsNavMeshPassable(CTFPlayer* pLocal, CMap* pMap,
+	const Vector& vFrom, const Vector& vTo, CNavArea* pFromArea)
+{
+	constexpr int   kMaxSteps   = 48;
+	constexpr float kTol        = 16.f;
+	constexpr float kMaxFall    = 250.f;
+	constexpr float kMaxJump    = 72.f;
+
+	// Horizontal direction — kept constant for the whole march (no refraction)
+	Vector vDir = vTo - vFrom;
+	vDir.z = 0.f;
+	const float flTotalDist = vDir.Length();
+	if (flTotalDist < 16.f)
+		return true;
+	vDir /= flTotalDist;
+
+	CNavArea* pCur = pFromArea;
+	Vector    vPos = vFrom;
+
+	for (int iStep = 0; iStep < kMaxSteps; iStep++)
+	{
+		// Are we inside the destination area (or close enough)?
+		if (pCur)
+		{
+			const float cx1 = pCur->m_vNwCorner.x - kTol, cx2 = pCur->m_vSeCorner.x + kTol;
+			const float cy1 = pCur->m_vNwCorner.y - kTol, cy2 = pCur->m_vSeCorner.y + kTol;
+			if (vTo.x >= cx1 && vTo.x <= cx2 && vTo.y >= cy1 && vTo.y <= cy2)
+				break; // destination is in this area — do the final hull trace below
+		}
+
+		// Find where the ray exits pCur's AABB in XY
+		float tExit = FLT_MAX;
+		if (!pCur)
+			break;
+
+		const float minX = pCur->m_vNwCorner.x, maxX = pCur->m_vSeCorner.x;
+		const float minY = pCur->m_vNwCorner.y, maxY = pCur->m_vSeCorner.y;
+
+		if (vDir.x > 0.f) tExit = std::min(tExit, (maxX - vPos.x) / vDir.x);
+		else if (vDir.x < 0.f) tExit = std::min(tExit, (minX - vPos.x) / vDir.x);
+		if (vDir.y > 0.f) tExit = std::min(tExit, (maxY - vPos.y) / vDir.y);
+		else if (vDir.y < 0.f) tExit = std::min(tExit, (minY - vPos.y) / vDir.y);
+
+		if (tExit <= 0.f || tExit == FLT_MAX)
+			break;
+
+		// Clamp so we don't overshoot the destination
+		const float flRemaining = (vTo - vPos).Length2D();
+		tExit = std::min(tExit, flRemaining);
+
+		const Vector vExit = vPos + vDir * tExit;
+
+		// Find which neighbor the original ray direction enters at vExit
+		CNavArea* pNext = nullptr;
+		float flBestDist = kTol * 2.f;
+		for (int iDir = 0; iDir < 4; iDir++)
+		{
+			for (const auto& conn : pCur->m_vConnectionsDir[iDir])
+			{
+				CNavArea* pCand = conn.m_pArea;
+				if (!pCand || !pMap->IsAreaValid(pCand)) continue;
+
+				// The exit point must lie within the candidate's XY bounds (with tolerance)
+				if (vExit.x < pCand->m_vNwCorner.x - kTol || vExit.x > pCand->m_vSeCorner.x + kTol) continue;
+				if (vExit.y < pCand->m_vNwCorner.y - kTol || vExit.y > pCand->m_vSeCorner.y + kTol) continue;
+
+				// Z height check: candidate surface at exit point
+				const float flCandZ  = pCand->GetZ(vExit.x, vExit.y);
+				const float flCurZ   = pCur->GetZ(vExit.x, vExit.y);
+				const float flZDiff  = flCandZ - flCurZ;
+				if (flZDiff > kMaxJump || flZDiff < -kMaxFall) continue;
+
+				// Pick the candidate whose center is closest to the ray direction
+				const float flDist = Vector(vExit.x - pCand->m_vCenter.x, vExit.y - pCand->m_vCenter.y, 0.f).Length();
+				if (flDist < flBestDist) { flBestDist = flDist; pNext = pCand; }
+			}
+		}
+
+		if (!pNext)
+		{
+			// Ray left the navmesh — fall through to hull trace for this segment
+			break;
+		}
+
+		// Advance position: clamp entry point to neighbor bounds, re-project Z
+		const float entX = std::clamp(vExit.x, pNext->m_vNwCorner.x, pNext->m_vSeCorner.x);
+		const float entY = std::clamp(vExit.y, pNext->m_vNwCorner.y, pNext->m_vSeCorner.y);
+		vPos = { entX, entY, pNext->GetZ(entX, entY) };
+		pCur = pNext;
+	}
+
+	// Final hull trace for the remaining segment (or the whole thing if no navmesh found)
+	return CNavEngine::IsPlayerPassableNavigation(pLocal, vPos, vTo);
+}
+
 void CNavEngine::VischeckPath()
 {
 	static Timer tVischeckTimer{};
@@ -1160,7 +1264,7 @@ void CNavEngine::VischeckPath()
 		}
 
 		// Check if we can pass, if not, abort pathing and mark as bad
-		if (!IsPlayerPassableNavigation(pLocal, vCurrentCenter, vNextCenter))
+		if (!IsNavMeshPassable(pLocal, m_pMap.get(), vCurrentCenter, vNextCenter, tCrumb.m_pNavArea))
 		{
 			// Mark as invalid for a while
 			CachedConnection_t tEntry{};

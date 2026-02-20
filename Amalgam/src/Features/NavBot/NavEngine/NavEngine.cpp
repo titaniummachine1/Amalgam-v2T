@@ -6,6 +6,7 @@
 #include "../../Misc/Misc.h"
 #include "../BotUtils.h"
 #include "../../FollowBot/FollowBot.h"
+#include "../../ImGui/Menu/Menu.h"
 #include <boost/property_tree/json_parser.hpp>
 #include <boost/property_tree/ptree.hpp>
 #include <limits>

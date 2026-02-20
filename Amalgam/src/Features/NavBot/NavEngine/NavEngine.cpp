@@ -468,6 +468,9 @@ bool CNavEngine::SaveCrumbCache() const
 	return true;
 }
 
+// Forward declaration — defined after NavTo
+static bool NavMarchSegment(CTFPlayer*, CMap*, const Vector&, const Vector&, CNavArea*, bool, std::vector<Crumb_t>*, float);
+
 // ── Portal / SSFA helpers ────────────────────────────────────────────────────
 
 struct NavPortal_t

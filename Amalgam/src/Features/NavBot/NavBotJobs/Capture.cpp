@@ -196,7 +196,7 @@ bool CNavBotCapture::GetPayloadGoal(const Vector vLocalOrigin, int iOurTeam, Vec
 			return pBest;
 		};
 
-	CNavArea* pInitialArea = F::NavEngine.FindClosestNavArea(vCartPos, false);
+	CNavArea* pInitialArea = F::NavEngine.FindClosestNavArea(vCartPos);
 	pCartArea = IsAreaUsable(pInitialArea) ? pInitialArea : FindGroundArea();
 
 	if (pCartArea)

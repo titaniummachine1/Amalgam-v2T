@@ -2034,17 +2034,29 @@ void CNavEngine::Render()
 
 	if (Vars::Misc::Movement::NavEngine::Draw.Value & Vars::Misc::Movement::NavEngine::DrawEnum::FloodFill && m_pLocalArea && m_pMap)
 	{
-		constexpr float flFloodRadius = 800.f;
-		std::vector<CNavArea*> vNearby;
+		constexpr int iMaxHops = 12;
+		std::unordered_set<CNavArea*> setVisited;
+		std::queue<std::pair<CNavArea*, int>> qBFS;
 		{
 			std::lock_guard lock(m_pMap->m_mutex);
-			m_pMap->CollectAreasAround(m_pLocalArea->m_vCenter, flFloodRadius, vNearby);
+			qBFS.emplace(m_pLocalArea, 0);
+			setVisited.insert(m_pLocalArea);
+			while (!qBFS.empty())
+			{
+				auto [pCur, iDepth] = qBFS.front();
+				qBFS.pop();
+				if (iDepth >= iMaxHops)
+					continue;
+				for (auto& tConn : pCur->m_vConnections)
+				{
+					if (tConn.m_pArea && setVisited.insert(tConn.m_pArea).second)
+						qBFS.emplace(tConn.m_pArea, iDepth + 1);
+				}
+			}
 		}
 		const Color_t cFlood = Vars::Colors::NavbotArea.Value;
-		for (auto pArea : vNearby)
+		for (auto pArea : setVisited)
 		{
-			if (!pArea)
-				continue;
 			H::Draw.RenderLine(pArea->m_vNwCorner,  pArea->GetNeCorner(), cFlood, false);
 			H::Draw.RenderLine(pArea->GetNeCorner(), pArea->m_vSeCorner,  cFlood, false);
 			H::Draw.RenderLine(pArea->m_vSeCorner,  pArea->GetSwCorner(), cFlood, false);

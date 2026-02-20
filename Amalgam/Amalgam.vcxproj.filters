@@ -240,6 +240,7 @@
     <ClCompile Include="src\Hooks\CBasePlayer_CalcObserverView.cpp" />
     <ClCompile Include="src\Hooks\CTFPlayerShared_ShouldSuppressPrediction.cpp" />
     <ClCompile Include="src\Features\Players\SteamProfileCache.cpp" />
+    <ClCompile Include="src\Features\NavBot\NavEngine\KDTree.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\Utils\UtlVector\UtlVector.h" />
@@ -670,6 +671,7 @@
     <ClInclude Include="src\Features\Players\SteamProfileCache.h" />
     <ClInclude Include="src\SDK\Definitions\Interfaces\IDemoPlayer.h" />
     <ClInclude Include="src\SDK\Definitions\Interfaces\IDemoRecorder.h" />
+    <ClInclude Include="src\Features\NavBot\NavEngine\KDTree.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="cpp.hint" />

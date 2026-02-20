@@ -1,5 +1,6 @@
 #include "KDTree.h"
 #include <cmath>
+#include <stack>
 
 static constexpr float BBOX_Z_BELOW = 8.0f;
 static constexpr float BBOX_Z_ABOVE = 82.0f;
@@ -25,39 +26,79 @@ void CNavMeshKDTree::Build(std::vector<CNavArea>& vAreas)
 
 int CNavMeshKDTree::BuildRecursive(CNavArea** ppAreas, int iCount, int iDepth)
 {
-	if (iCount <= 0)
-		return -1;
+	struct BuildTask
+	{
+		CNavArea** ppAreas;
+		int iCount;
+		int iDepth;
+		int iNodeIdx;
+		int iPhase;
+		int iMedian;
+		CNavArea* pMedianArea;
+	};
 
-	int iAxis = iDepth % 2;
-	int iMedian = iCount / 2;
+	std::stack<BuildTask> stk;
+	stk.push({ ppAreas, iCount, iDepth, -1, 0, 0, nullptr });
 
-	std::nth_element(ppAreas, ppAreas + iMedian, ppAreas + iCount,
-		[iAxis](const CNavArea* a, const CNavArea* b)
+	int iReturnVal = -1;
+
+	while (!stk.empty())
+	{
+		BuildTask& t = stk.top();
+
+		if (t.iCount <= 0)
 		{
-			if (iAxis == 0)
-				return (a->m_vNwCorner.x + a->m_vSeCorner.x) < (b->m_vNwCorner.x + b->m_vSeCorner.x);
-			return (a->m_vNwCorner.y + a->m_vSeCorner.y) < (b->m_vNwCorner.y + b->m_vSeCorner.y);
-		});
+			iReturnVal = -1;
+			stk.pop();
+			continue;
+		}
 
-	int iNodeIdx = static_cast<int>(m_vNodes.size());
-	m_vNodes.emplace_back();
+		if (t.iPhase == 0)
+		{
+			int iAxis = t.iDepth % 2;
+			t.iMedian = t.iCount / 2;
 
-	CNavArea* pMedianArea = ppAreas[iMedian];
-	float flSplit = (iAxis == 0)
-		? (pMedianArea->m_vNwCorner.x + pMedianArea->m_vSeCorner.x) * 0.5f
-		: (pMedianArea->m_vNwCorner.y + pMedianArea->m_vSeCorner.y) * 0.5f;
+			std::nth_element(t.ppAreas, t.ppAreas + t.iMedian, t.ppAreas + t.iCount,
+				[iAxis](const CNavArea* a, const CNavArea* b)
+				{
+					if (iAxis == 0)
+						return (a->m_vNwCorner.x + a->m_vSeCorner.x) < (b->m_vNwCorner.x + b->m_vSeCorner.x);
+					return (a->m_vNwCorner.y + a->m_vSeCorner.y) < (b->m_vNwCorner.y + b->m_vSeCorner.y);
+				});
 
-	int iLeft = BuildRecursive(ppAreas, iMedian, iDepth + 1);
-	int iRight = BuildRecursive(ppAreas + iMedian + 1, iCount - iMedian - 1, iDepth + 1);
+			t.iNodeIdx = static_cast<int>(m_vNodes.size());
+			m_vNodes.emplace_back();
+			t.pMedianArea = t.ppAreas[t.iMedian];
+			t.iPhase = 1;
 
-	m_vNodes[iNodeIdx].pArea = pMedianArea;
-	m_vNodes[iNodeIdx].iAxis = iAxis;
-	m_vNodes[iNodeIdx].flSplitValue = flSplit;
-	m_vNodes[iNodeIdx].iLeft = iLeft;
-	m_vNodes[iNodeIdx].iRight = iRight;
-	m_vNodes[iNodeIdx].bbox = CalculateSubtreeBBox(iNodeIdx);
+			stk.push({ t.ppAreas, t.iMedian, t.iDepth + 1, -1, 0, 0, nullptr });
+		}
+		else if (t.iPhase == 1)
+		{
+			m_vNodes[t.iNodeIdx].iLeft = iReturnVal;
+			t.iPhase = 2;
 
-	return iNodeIdx;
+			stk.push({ t.ppAreas + t.iMedian + 1, t.iCount - t.iMedian - 1, t.iDepth + 1, -1, 0, 0, nullptr });
+		}
+		else
+		{
+			int iAxis = t.iDepth % 2;
+			float flSplit = (iAxis == 0)
+				? (t.pMedianArea->m_vNwCorner.x + t.pMedianArea->m_vSeCorner.x) * 0.5f
+				: (t.pMedianArea->m_vNwCorner.y + t.pMedianArea->m_vSeCorner.y) * 0.5f;
+
+			m_vNodes[t.iNodeIdx].iRight = iReturnVal;
+			m_vNodes[t.iNodeIdx].pArea = t.pMedianArea;
+			m_vNodes[t.iNodeIdx].iAxis = iAxis;
+			m_vNodes[t.iNodeIdx].flSplitValue = flSplit;
+			m_vNodes[t.iNodeIdx].bbox = CalculateSubtreeBBox(t.iNodeIdx);
+
+			iReturnVal = t.iNodeIdx;
+			stk.pop();
+		}
+	}
+
+	return iReturnVal;
 }
 
 AABB CNavMeshKDTree::CalculateAreaBBox(const CNavArea* pArea) const
@@ -143,22 +184,33 @@ CNavArea* CNavMeshKDTree::FindContainingArea(const Vector& vPos) const
 
 CNavArea* CNavMeshKDTree::FindContainingRecursive(int iNode, const Vector& vPos) const
 {
-	if (iNode == -1)
-		return nullptr;
+	std::stack<int> stk;
+	if (iNode != -1)
+		stk.push(iNode);
 
-	const KDNode& node = m_vNodes[iNode];
+	while (!stk.empty())
+	{
+		int iCur = stk.top();
+		stk.pop();
 
-	if (!IsPointInAABB(vPos, node.bbox))
-		return nullptr;
+		if (iCur == -1)
+			continue;
 
-	if (IsPointInNavArea(vPos, node.pArea))
-		return node.pArea;
+		const KDNode& node = m_vNodes[iCur];
 
-	CNavArea* pResult = FindContainingRecursive(node.iLeft, vPos);
-	if (pResult)
-		return pResult;
+		if (!IsPointInAABB(vPos, node.bbox))
+			continue;
 
-	return FindContainingRecursive(node.iRight, vPos);
+		if (IsPointInNavArea(vPos, node.pArea))
+			return node.pArea;
+
+		if (node.iRight != -1)
+			stk.push(node.iRight);
+		if (node.iLeft != -1)
+			stk.push(node.iLeft);
+	}
+
+	return nullptr;
 }
 
 CNavArea* CNavMeshKDTree::FindClosestArea(const Vector& vPos) const
@@ -176,32 +228,44 @@ CNavArea* CNavMeshKDTree::FindClosestArea(const Vector& vPos) const
 
 void CNavMeshKDTree::FindClosestRecursive(int iNode, const Vector& vPos, CNavArea*& pBestArea, float& flBestDistSq) const
 {
-	if (iNode == -1)
-		return;
+	std::stack<int> stk;
+	if (iNode != -1)
+		stk.push(iNode);
 
-	const KDNode& node = m_vNodes[iNode];
-
-	float flMinDistSq = GetAABBDistanceSq(vPos, node.bbox);
-	if (flMinDistSq >= flBestDistSq)
-		return;
-
-	const Vector& vCenter = node.pArea->m_vCenter;
-	const float flAreaZ = node.pArea->GetZ(vPos.x, vPos.y);
-	const float flVertical = std::fabs(flAreaZ - vPos.z);
-	const float flPlanarSq = (vPos.x - vCenter.x) * (vPos.x - vCenter.x) + (vPos.y - vCenter.y) * (vPos.y - vCenter.y);
-	const float flDistSq = flPlanarSq + flVertical * flVertical * 6.f;
-	if (flDistSq < flBestDistSq)
+	while (!stk.empty())
 	{
-		flBestDistSq = flDistSq;
-		pBestArea = node.pArea;
+		int iCur = stk.top();
+		stk.pop();
+
+		if (iCur == -1)
+			continue;
+
+		const KDNode& node = m_vNodes[iCur];
+
+		float flMinDistSq = GetAABBDistanceSq(vPos, node.bbox);
+		if (flMinDistSq >= flBestDistSq)
+			continue;
+
+		const Vector& vCenter = node.pArea->m_vCenter;
+		const float flAreaZ = node.pArea->GetZ(vPos.x, vPos.y);
+		const float flVertical = std::fabs(flAreaZ - vPos.z);
+		const float flPlanarSq = (vPos.x - vCenter.x) * (vPos.x - vCenter.x) + (vPos.y - vCenter.y) * (vPos.y - vCenter.y);
+		const float flDistSq = flPlanarSq + flVertical * flVertical * 6.f;
+		if (flDistSq < flBestDistSq)
+		{
+			flBestDistSq = flDistSq;
+			pBestArea = node.pArea;
+		}
+
+		float flQueryVal = (node.iAxis == 0) ? vPos.x : vPos.y;
+		int iNear = (flQueryVal < node.flSplitValue) ? node.iLeft : node.iRight;
+		int iFar  = (flQueryVal < node.flSplitValue) ? node.iRight : node.iLeft;
+
+		if (iFar != -1)
+			stk.push(iFar);
+		if (iNear != -1)
+			stk.push(iNear);
 	}
-
-	float flQueryVal = (node.iAxis == 0) ? vPos.x : vPos.y;
-	int iNear = (flQueryVal < node.flSplitValue) ? node.iLeft : node.iRight;
-	int iFar = (flQueryVal < node.flSplitValue) ? node.iRight : node.iLeft;
-
-	FindClosestRecursive(iNear, vPos, pBestArea, flBestDistSq);
-	FindClosestRecursive(iFar, vPos, pBestArea, flBestDistSq);
 }
 
 FindAreaResult CNavMeshKDTree::FindArea(const Vector& vPos) const

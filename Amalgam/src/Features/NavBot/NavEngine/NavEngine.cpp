@@ -1300,6 +1300,30 @@ void CNavEngine::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 		Reset(true);
 	}
 
+	// Cancel current path when settings change, but only check while menu is open
+	if (F::Menu.m_bIsOpen)
+	{
+		static int iLastNavBotPrefs = Vars::Misc::Movement::NavBot::Preferences.Value;
+		static bool bLastPathRandomization = Vars::Misc::Movement::NavEngine::PathRandomization.Value;
+		static bool bLastPathInSetup = Vars::Misc::Movement::NavEngine::PathInSetup.Value;
+		static bool bLastVischeckEnabled = Vars::Misc::Movement::NavEngine::VischeckEnabled.Value;
+
+		const int iPrefs = Vars::Misc::Movement::NavBot::Preferences.Value;
+		const bool bRand = Vars::Misc::Movement::NavEngine::PathRandomization.Value;
+		const bool bSetup = Vars::Misc::Movement::NavEngine::PathInSetup.Value;
+		const bool bVischeck = Vars::Misc::Movement::NavEngine::VischeckEnabled.Value;
+
+		if (iPrefs != iLastNavBotPrefs || bRand != bLastPathRandomization ||
+			bSetup != bLastPathInSetup || bVischeck != bLastVischeckEnabled)
+		{
+			iLastNavBotPrefs = iPrefs;
+			bLastPathRandomization = bRand;
+			bLastPathInSetup = bSetup;
+			bLastVischeckEnabled = bVischeck;
+			CancelPath();
+		}
+	}
+
 	if (Vars::Misc::Movement::NavEngine::DisableOnSpectate.Value && H::Entities.IsSpectated())
 		return;
 
@@ -1978,6 +2002,7 @@ void CNavEngine::Render()
 			}
 		}
 	}
+
 	Vector vOrigin = pLocal->GetAbsOrigin();
 	if (Vars::Misc::Movement::NavEngine::Draw.Value & Vars::Misc::Movement::NavEngine::DrawEnum::Area && GetLocalNavArea(vOrigin))
 	{
@@ -1986,14 +2011,51 @@ void CNavEngine::Render()
 		H::Draw.RenderBox(vEdge, Vector(-4.0f, -4.0f, -1.0f), Vector(4.0f, 4.0f, 1.0f), Vector(), Color_t(255, 0, 0, 255), false);
 		H::Draw.RenderWireframeBox(vEdge, Vector(-4.0f, -4.0f, -1.0f), Vector(4.0f, 4.0f, 1.0f), Vector(), Color_t(255, 0, 0, 255), false);
 
-		// Nw -> Ne
-		H::Draw.RenderLine(m_pLocalArea->m_vNwCorner, m_pLocalArea->GetNeCorner(), Vars::Colors::NavbotArea.Value, true);
-		// Nw -> Sw
-		H::Draw.RenderLine(m_pLocalArea->m_vNwCorner, m_pLocalArea->GetSwCorner(), Vars::Colors::NavbotArea.Value, true);
-		// Ne -> Se
-		H::Draw.RenderLine(m_pLocalArea->GetNeCorner(), m_pLocalArea->m_vSeCorner, Vars::Colors::NavbotArea.Value, true);
-		// Sw -> Se
-		H::Draw.RenderLine(m_pLocalArea->GetSwCorner(), m_pLocalArea->m_vSeCorner, Vars::Colors::NavbotArea.Value, true);
+		constexpr int iMaxHops = 12;
+		std::unordered_set<CNavArea*> setVisited;
+		std::queue<std::pair<CNavArea*, int>> qBFS;
+		{
+			std::lock_guard lock(m_pMap->m_mutex);
+			qBFS.emplace(m_pLocalArea, 0);
+			setVisited.insert(m_pLocalArea);
+			while (!qBFS.empty())
+			{
+				auto [pCur, iDepth] = qBFS.front();
+				qBFS.pop();
+				if (iDepth >= iMaxHops)
+					continue;
+				for (auto& tConn : pCur->m_vConnections)
+				{
+					if (tConn.m_pArea && setVisited.insert(tConn.m_pArea).second)
+						qBFS.emplace(tConn.m_pArea, iDepth + 1);
+				}
+			}
+		}
+		const Color_t cOutline = Vars::Colors::NavbotArea.Value;
+		const Color_t cFill    = Vars::Colors::NavbotAreaFill.Value;
+		for (auto pArea : setVisited)
+		{
+			const Vector vNw = pArea->m_vNwCorner;
+			const Vector vNe = pArea->GetNeCorner();
+			const Vector vSw = pArea->GetSwCorner();
+			const Vector vSe = pArea->m_vSeCorner;
+			// Filled quad (split along NW->SE, no center line)
+			if (cFill.a)
+			{
+				H::Draw.RenderTriangle(vNw, vNe, vSe, cFill, false);
+				H::Draw.RenderTriangle(vNw, vSe, vNe, cFill, false);
+				H::Draw.RenderTriangle(vNw, vSe, vSw, cFill, false);
+				H::Draw.RenderTriangle(vNw, vSw, vSe, cFill, false);
+			}
+			// Outline
+			if (cOutline.a)
+			{
+				H::Draw.RenderLine(vNw, vNe, cOutline, false);
+				H::Draw.RenderLine(vNe, vSe, cOutline, false);
+				H::Draw.RenderLine(vSe, vSw, cOutline, false);
+				H::Draw.RenderLine(vSw, vNw, cOutline, false);
+			}
+		}
 	}
 
 	if (Vars::Misc::Movement::NavEngine::Draw.Value & Vars::Misc::Movement::NavEngine::DrawEnum::Path && !m_vCrumbs.empty())
@@ -2029,38 +2091,7 @@ void CNavEngine::Render()
 			const Vector vRight2 = vBase + vRight * flHeadWidth;
 
 			H::Draw.RenderTriangle(vTo, vLeft, vRight2, cArrow, false);
-		}
-	}
-
-	if (Vars::Misc::Movement::NavEngine::Draw.Value & Vars::Misc::Movement::NavEngine::DrawEnum::FloodFill && m_pLocalArea && m_pMap)
-	{
-		constexpr int iMaxHops = 12;
-		std::unordered_set<CNavArea*> setVisited;
-		std::queue<std::pair<CNavArea*, int>> qBFS;
-		{
-			std::lock_guard lock(m_pMap->m_mutex);
-			qBFS.emplace(m_pLocalArea, 0);
-			setVisited.insert(m_pLocalArea);
-			while (!qBFS.empty())
-			{
-				auto [pCur, iDepth] = qBFS.front();
-				qBFS.pop();
-				if (iDepth >= iMaxHops)
-					continue;
-				for (auto& tConn : pCur->m_vConnections)
-				{
-					if (tConn.m_pArea && setVisited.insert(tConn.m_pArea).second)
-						qBFS.emplace(tConn.m_pArea, iDepth + 1);
-				}
-			}
-		}
-		const Color_t cFlood = Vars::Colors::NavbotArea.Value;
-		for (auto pArea : setVisited)
-		{
-			H::Draw.RenderLine(pArea->m_vNwCorner,  pArea->GetNeCorner(), cFlood, false);
-			H::Draw.RenderLine(pArea->GetNeCorner(), pArea->m_vSeCorner,  cFlood, false);
-			H::Draw.RenderLine(pArea->m_vSeCorner,  pArea->GetSwCorner(), cFlood, false);
-			H::Draw.RenderLine(pArea->GetSwCorner(), pArea->m_vNwCorner,  cFlood, false);
+			H::Draw.RenderTriangle(vTo, vRight2, vLeft, cArrow, false);
 		}
 	}
 

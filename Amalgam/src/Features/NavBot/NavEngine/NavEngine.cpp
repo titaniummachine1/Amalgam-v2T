@@ -2012,7 +2012,7 @@ void CNavEngine::Render()
 		H::Draw.RenderBox(vEdge, Vector(-4.0f, -4.0f, -1.0f), Vector(4.0f, 4.0f, 1.0f), Vector(), Color_t(255, 0, 0, 255), false);
 		H::Draw.RenderWireframeBox(vEdge, Vector(-4.0f, -4.0f, -1.0f), Vector(4.0f, 4.0f, 1.0f), Vector(), Color_t(255, 0, 0, 255), false);
 
-		constexpr int iMaxHops = 12;
+		const int iMaxHops = Vars::Misc::Movement::NavEngine::AreaDrawDepth.Value;
 		std::unordered_set<CNavArea*> setVisited;
 		std::queue<std::pair<CNavArea*, int>> qBFS;
 		{
@@ -2032,14 +2032,23 @@ void CNavEngine::Render()
 				}
 			}
 		}
-		const Color_t cOutline = Vars::Colors::NavbotArea.Value;
-		const Color_t cFill    = Vars::Colors::NavbotAreaFill.Value;
+		const Color_t cOutline    = Vars::Colors::NavbotArea.Value;
+		const Color_t cFill       = Vars::Colors::NavbotAreaFill.Value;
+		const Color_t cPortal     = Vars::Colors::NavbotPortal.Value;
+		const Color_t cWallCorner = Vars::Colors::NavbotWallCorner.Value;
 		for (auto pArea : setVisited)
 		{
+			const float minX = pArea->m_vNwCorner.x, maxX = pArea->m_vSeCorner.x;
+			const float minY = pArea->m_vNwCorner.y, maxY = pArea->m_vSeCorner.y;
+			const float zNW = pArea->m_vNwCorner.z, zNE = pArea->m_flNeZ;
+			const float zSW = pArea->m_flSwZ,       zSE = pArea->m_vSeCorner.z;
+			const float dX = maxX - minX, dY = maxY - minY;
+
 			const Vector vNw = pArea->m_vNwCorner;
 			const Vector vNe = pArea->GetNeCorner();
 			const Vector vSw = pArea->GetSwCorner();
 			const Vector vSe = pArea->m_vSeCorner;
+
 			// Filled quad (split along NW->SE, no center line)
 			if (cFill.a)
 			{
@@ -2055,6 +2064,90 @@ void CNavEngine::Render()
 				H::Draw.RenderLine(vNe, vSe, cOutline, false);
 				H::Draw.RenderLine(vSe, vSw, cOutline, false);
 				H::Draw.RenderLine(vSw, vNw, cOutline, false);
+			}
+
+			// Per-edge: track whether any portal reaches min/max end
+			// Dir 0=North(X), 1=East(Y), 2=South(X), 3=West(Y)
+			bool bEdgeReachesMin[4] = {};
+			bool bEdgeReachesMax[4] = {};
+			constexpr float fEps = 2.f;
+
+			for (int iDir = 0; iDir < 4; iDir++)
+			{
+				const bool bAxisX = (iDir == 0 || iDir == 2);
+				const float edgeMin = bAxisX ? minX : minY;
+				const float edgeMax = bAxisX ? maxX : maxY;
+
+				for (auto& conn : pArea->m_vConnectionsDir[iDir])
+				{
+					if (!conn.m_pArea) continue;
+					const CNavArea* pB = conn.m_pArea;
+					const float bMinX = pB->m_vNwCorner.x, bMaxX = pB->m_vSeCorner.x;
+					const float bMinY = pB->m_vNwCorner.y, bMaxY = pB->m_vSeCorner.y;
+
+					float oMin, oMax;
+					if (bAxisX) { oMin = std::max(minX, bMinX); oMax = std::min(maxX, bMaxX); }
+					else        { oMin = std::max(minY, bMinY); oMax = std::min(maxY, bMaxY); }
+					if (oMax <= oMin) continue;
+
+					if (oMin <= edgeMin + fEps) bEdgeReachesMin[iDir] = true;
+					if (oMax >= edgeMax - fEps) bEdgeReachesMax[iDir] = true;
+
+					if (!cPortal.a) continue;
+
+					// Compute portal endpoints with Z interpolated on A's edge
+					Vector vP0, vP1;
+					if (iDir == 0) // North: at Y=minY, NW->NE
+					{
+						float t0 = dX > 0 ? (oMin - minX) / dX : 0.f;
+						float t1 = dX > 0 ? (oMax - minX) / dX : 0.f;
+						vP0 = { oMin, minY, zNW + t0 * (zNE - zNW) + 2.f };
+						vP1 = { oMax, minY, zNW + t1 * (zNE - zNW) + 2.f };
+					}
+					else if (iDir == 1) // East: at X=maxX, NE->SE
+					{
+						float t0 = dY > 0 ? (oMin - minY) / dY : 0.f;
+						float t1 = dY > 0 ? (oMax - minY) / dY : 0.f;
+						vP0 = { maxX, oMin, zNE + t0 * (zSE - zNE) + 2.f };
+						vP1 = { maxX, oMax, zNE + t1 * (zSE - zNE) + 2.f };
+					}
+					else if (iDir == 2) // South: at Y=maxY, SW->SE
+					{
+						float t0 = dX > 0 ? (oMin - minX) / dX : 0.f;
+						float t1 = dX > 0 ? (oMax - minX) / dX : 0.f;
+						vP0 = { oMin, maxY, zSW + t0 * (zSE - zSW) + 2.f };
+						vP1 = { oMax, maxY, zSW + t1 * (zSE - zSW) + 2.f };
+					}
+					else // West: at X=minX, NW->SW
+					{
+						float t0 = dY > 0 ? (oMin - minY) / dY : 0.f;
+						float t1 = dY > 0 ? (oMax - minY) / dY : 0.f;
+						vP0 = { minX, oMin, zNW + t0 * (zSW - zNW) + 2.f };
+						vP1 = { minX, oMax, zNW + t1 * (zSW - zNW) + 2.f };
+					}
+					H::Draw.RenderLine(vP0, vP1, cPortal, false);
+					// Draw twice offset by 1 in Z for visual thickness
+					vP0.z += 1.f; vP1.z += 1.f;
+					H::Draw.RenderLine(vP0, vP1, cPortal, false);
+				}
+			}
+
+			// Outside corners: corner is outside if BOTH adjacent edges have no portal reaching it
+			if (cWallCorner.a)
+			{
+				const Vector vCornerBox(-4.f, -4.f, -4.f), vCornerBoxMax(4.f, 4.f, 4.f);
+				// NW: North min + West min
+				if (!bEdgeReachesMin[0] && !bEdgeReachesMin[3])
+					H::Draw.RenderBox(vNw, vCornerBox, vCornerBoxMax, Vector(), cWallCorner, false);
+				// NE: North max + East min
+				if (!bEdgeReachesMax[0] && !bEdgeReachesMin[1])
+					H::Draw.RenderBox(vNe, vCornerBox, vCornerBoxMax, Vector(), cWallCorner, false);
+				// SW: South min + West max
+				if (!bEdgeReachesMin[2] && !bEdgeReachesMax[3])
+					H::Draw.RenderBox(vSw, vCornerBox, vCornerBoxMax, Vector(), cWallCorner, false);
+				// SE: South max + East max
+				if (!bEdgeReachesMax[2] && !bEdgeReachesMax[1])
+					H::Draw.RenderBox(vSe, vCornerBox, vCornerBoxMax, Vector(), cWallCorner, false);
 			}
 		}
 	}

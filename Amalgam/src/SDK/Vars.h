@@ -264,6 +264,8 @@ namespace Vars
 		CVar(NavbotWalkablePath, "Navbot walkable path color", Color_t(0, 255, 255, 200), VISUAL);
 		CVar(NavbotArea, "Navbot area color", Color_t(0, 255, 0, 255), VISUAL);
 		CVar(NavbotAreaFill, "Navbot area fill color", Color_t(0, 255, 0, 10), VISUAL);
+		CVar(NavbotPortal, "Navbot portal color", Color_t(0, 200, 255, 255), VISUAL);
+		CVar(NavbotWallCorner, "Navbot wall corner color", Color_t(255, 255, 255, 255), VISUAL);
 		CVar(NavbotBlacklist, "Navbot blacklisted color", Color_t(255, 0, 0, 255), VISUAL);
 		CVar(FollowbotPathLine, "Followbot path line color", Color_t(255, 255, 0, 255), VISUAL);
 		CVar(FollowbotPathBox, "Followbot path box color", Color_t(255, 255, 0, 255), VISUAL);
@@ -818,6 +820,7 @@ I dont think this is a good idea to disable simulations completely:
 				CVar(VischeckEnabled, "Vischeck enabled", false);
 				CVar(VischeckTime, "Vischeck time", 2.f, SLIDER_MIN, 0.005f, 3.f, 0.005f, "%gs");
 				CVar(VischeckCacheTime, "Vischeck cache time", 90, SLIDER_MIN, 10, 500, 10, "%is");
+				CVar(AreaDrawDepth, "Area draw depth", 15, SLIDER_CLAMP, 1, 30);
 			SUBNAMESPACE_END(NavEngine);
 
 			SUBNAMESPACE_BEGIN(BotUtils)

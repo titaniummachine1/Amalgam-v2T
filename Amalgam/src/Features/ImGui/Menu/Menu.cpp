@@ -1524,7 +1524,10 @@ void CMenu::MenuMisc(int iTab)
 						// FColorPicker(Vars::Colors::NavbotWalkablePath, FColorPickerEnum::SameLine, {}, { H::Draw.Scale(10), H::Draw.Scale(40) });
 						FColorPicker(Vars::Colors::NavbotArea, FColorPickerEnum::SameLine, {}, { H::Draw.Scale(10), H::Draw.Scale(40) });
 						FColorPicker(Vars::Colors::NavbotAreaFill, FColorPickerEnum::SameLine, {}, { H::Draw.Scale(10), H::Draw.Scale(40) });
+						FColorPicker(Vars::Colors::NavbotPortal, FColorPickerEnum::SameLine, {}, { H::Draw.Scale(10), H::Draw.Scale(40) });
+						FColorPicker(Vars::Colors::NavbotWallCorner, FColorPickerEnum::SameLine, {}, { H::Draw.Scale(10), H::Draw.Scale(40) });
 						FColorPicker(Vars::Colors::NavbotBlacklist, FColorPickerEnum::SameLine, {}, { H::Draw.Scale(10), H::Draw.Scale(40) });
+						FSlider(Vars::Misc::Movement::NavEngine::AreaDrawDepth, FSliderEnum::None);
 
 						FSlider(Vars::Misc::Movement::NavEngine::StickyIgnoreTime, FSliderEnum::Left);
 						FSlider(Vars::Misc::Movement::NavEngine::StuckDetectTime, FSliderEnum::Right);

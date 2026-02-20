@@ -2035,7 +2035,9 @@ void CNavEngine::Render()
 		const Color_t cOutline    = Vars::Colors::NavbotArea.Value;
 		const Color_t cFill       = Vars::Colors::NavbotAreaFill.Value;
 		const Color_t cPortal     = Vars::Colors::NavbotPortal.Value;
-		const Color_t cWallCorner = Vars::Colors::NavbotWallCorner.Value;
+		constexpr Color_t cWallCorner{ 255, 255, 255, 220 };
+	const bool bDrawWallCorners = !!(Vars::Misc::Movement::NavEngine::Draw.Value & Vars::Misc::Movement::NavEngine::DrawEnum::WallCorners);
+	const bool bDrawPortals     = !!(Vars::Misc::Movement::NavEngine::Draw.Value & Vars::Misc::Movement::NavEngine::DrawEnum::Portals);
 		for (auto pArea : setVisited)
 		{
 			const float minX = pArea->m_vNwCorner.x, maxX = pArea->m_vSeCorner.x;
@@ -2086,7 +2088,7 @@ void CNavEngine::Render()
 			};
 
 			// Draw portals (shared X/Y overlap on A's edge, Z interpolated)
-			if (cPortal.a)
+			if (bDrawPortals && cPortal.a)
 			{
 				for (int iDir = 0; iDir < 4; iDir++)
 				{
@@ -2132,18 +2134,22 @@ void CNavEngine::Render()
 				}
 			}
 
-			// Wall corners: corner exposed on EITHER adjacent edge (Lua: not hasDir1 OR not hasDir2)
-			if (cWallCorner.a)
+			// Wall corners: right-triangle pointing into the area at each exposed corner
+			if (bDrawWallCorners)
 			{
-				const Vector vCB(-4.f, -4.f, -4.f), vCBMax(4.f, 4.f, 4.f);
-				if (!isCovered(0, minX) || !isCovered(3, minY)) // NW
-					H::Draw.RenderBox(vNw, vCB, vCBMax, Vector(), cWallCorner, false);
-				if (!isCovered(0, maxX) || !isCovered(1, minY)) // NE
-					H::Draw.RenderBox(vNe, vCB, vCBMax, Vector(), cWallCorner, false);
-				if (!isCovered(2, minX) || !isCovered(3, maxY)) // SW
-					H::Draw.RenderBox(vSw, vCB, vCBMax, Vector(), cWallCorner, false);
-				if (!isCovered(2, maxX) || !isCovered(1, maxY)) // SE
-					H::Draw.RenderBox(vSe, vCB, vCBMax, Vector(), cWallCorner, false);
+				constexpr float s = 8.f;
+				auto DrawCornerTri = [&](const Vector& v, float dx, float dy)
+				{
+					const Vector p0{ v.x,         v.y,         v.z + 1.f };
+					const Vector p1{ v.x + dx * s, v.y,         v.z + 1.f };
+					const Vector p2{ v.x,         v.y + dy * s, v.z + 1.f };
+					H::Draw.RenderTriangle(p0, p1, p2, cWallCorner, false);
+					H::Draw.RenderTriangle(p0, p2, p1, cWallCorner, false);
+				};
+				if (!isCovered(0, minX) || !isCovered(3, minY)) DrawCornerTri(vNw,  1.f,  1.f);
+				if (!isCovered(0, maxX) || !isCovered(1, minY)) DrawCornerTri(vNe, -1.f,  1.f);
+				if (!isCovered(2, minX) || !isCovered(3, maxY)) DrawCornerTri(vSw,  1.f, -1.f);
+				if (!isCovered(2, maxX) || !isCovered(1, maxY)) DrawCornerTri(vSe, -1.f, -1.f);
 			}
 		}
 	}

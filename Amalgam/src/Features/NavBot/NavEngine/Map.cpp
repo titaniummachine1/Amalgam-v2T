@@ -565,7 +565,9 @@ float CMap::GetBlacklistPenalty(const BlacklistReason_t& tReason) const
 		switch (tReason.m_eValue)
 		{
 		case BlacklistReasonEnum::Sentry:
+			[[fallthrough]];
 		case BlacklistReasonEnum::SentryMedium:
+			[[fallthrough]];
 		case BlacklistReasonEnum::SentryLow:
 			return 0.f;
 		default: break;

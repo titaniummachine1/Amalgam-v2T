@@ -946,6 +946,14 @@ bool CNavEngine::NavTo(const Vector& vDestination, PriorityListEnum::PriorityLis
 		std::vector<NavPortal_t> vPortals;
 		vPortals.reserve(vPath.size());
 
+		auto FindConnDir = [](const CNavArea* pMid, const CNavArea* pOther) -> int
+		{
+			for (int d = 0; d < 4; d++)
+				for (const auto& c : pMid->m_vConnectionsDir[d])
+					if (c.m_pArea == pOther) return d;
+			return -1;
+		};
+
 		for (size_t i = 0; i + 1 < vPath.size(); i++)
 		{
 			auto pArea     = reinterpret_cast<CNavArea*>(vPath.at(i));
@@ -980,6 +988,29 @@ bool CNavEngine::NavTo(const Vector& vDestination, PriorityListEnum::PriorityLis
 			tPortal.vApproachDir   = tDropdown.m_vApproachDir;
 
 			vPortals.push_back(tPortal);
+
+			// Same-direction rule: if the next hop also leaves pNextArea on the same edge
+			// we entered it (e.g. entered from South, exit also to South), the bot would
+			// cut back across the entry edge. Insert a forced center waypoint so it must
+			// traverse the full area before turning around.
+			if (i + 2 < vPath.size())
+			{
+				auto pNextNextArea = reinterpret_cast<CNavArea*>(vPath.at(i + 2));
+				if (pNextNextArea)
+				{
+					const int iEntryDir = FindConnDir(pNextArea, pArea);
+					const int iExitDir  = FindConnDir(pNextArea, pNextNextArea);
+					if (iEntryDir >= 0 && iEntryDir == iExitDir)
+					{
+						NavPortal_t tCenter{};
+						tCenter.bForced = true;
+						tCenter.pArea   = pNextArea;
+						tCenter.vLeft   = tCenter.vRight = pNextArea->m_vCenter;
+						tCenter.vLeft.z = tCenter.vRight.z = pNextArea->GetZ(pNextArea->m_vCenter.x, pNextArea->m_vCenter.y);
+						vPortals.push_back(tCenter);
+					}
+				}
+			}
 		}
 
 		// Player start position for funnel apex
@@ -1045,71 +1076,6 @@ bool CNavEngine::NavTo(const Vector& vDestination, PriorityListEnum::PriorityLis
 						m_vCrumbs.erase(m_vCrumbs.begin());
 				}
 			}
-		}
-	}
-
-	if (!bIgnoreTraces && !m_vCrumbs.empty())
-	{
-		// Check if the path we just built is even valid with traces
-		// If not, we might want to try again with traces ignored if absolutely necessary
-		bool bValid = true;
-		const int iVischeckCacheSeconds = std::min(Vars::Misc::Movement::NavEngine::VischeckCacheTime.Value, 45);
-		const auto iVischeckCacheExpireTimestamp = TICKCOUNT_TIMESTAMP(iVischeckCacheSeconds);
-
-		for (size_t i = 0; i < m_vCrumbs.size() - 1; i++)
-		{
-			const auto& tCrumb = m_vCrumbs[i];
-			const auto& tNextCrumb = m_vCrumbs[i + 1];
-			const std::pair<CNavArea*, CNavArea*> tKey(tCrumb.m_pNavArea, tNextCrumb.m_pNavArea);
-
-			// Check if we have a valid cache entry
-			if (m_pMap->m_mVischeckCache.count(tKey))
-			{
-				auto& tEntry = m_pMap->m_mVischeckCache[tKey];
-				if (tEntry.m_iExpireTick > I::GlobalVars->tickcount)
-				{
-					if (!tEntry.m_bPassable)
-					{
-						bValid = false;
-						break;
-					}
-					continue;
-				}
-			}
-
-			if (!IsPlayerPassableNavigation(pLocalPlayer, tCrumb.m_vPos, tNextCrumb.m_vPos))
-			{
-				// Cache failure immediately
-				CachedConnection_t tEntry{};
-				tEntry.m_iExpireTick = iVischeckCacheExpireTimestamp;
-				tEntry.m_eVischeckState = VischeckStateEnum::NotVisible;
-				tEntry.m_bPassable = false;
-				tEntry.m_flCachedCost = std::numeric_limits<float>::max();
-				m_pMap->m_mVischeckCache[tKey] = tEntry;
-
-				bValid = false;
-				break;
-			}
-			else
-			{
-				// Cache success
-				CachedConnection_t& tEntry = m_pMap->m_mVischeckCache[tKey];
-				tEntry.m_iExpireTick = iVischeckCacheExpireTimestamp;
-				tEntry.m_eVischeckState = VischeckStateEnum::Visible;
-				tEntry.m_bPassable = true;
-			}
-		}
-
-		if (!bValid)
-		{
-			if (ShouldUseEmergencyFallback("Path blocked by traces"))
-			{
-				m_vCrumbs.clear();
-				return NavTo(vDestination, ePriority, bShouldRepath, bNavToLocal, true);
-			}
-
-			m_vCrumbs.clear();
-			return false;
 		}
 	}
 
@@ -1302,7 +1268,6 @@ void CNavEngine::CheckBlacklist(CTFPlayer* pLocal)
 		}
 	}
 }
-
 
 // !!! BETTER WAY OF DOING THIS?! !!!
 // the idea is really good i think. but it repaths like 1 bajilion times even when we are slightly offpath and rapes the cpu
@@ -2348,6 +2313,23 @@ void CNavEngine::Render()
 				return false;
 			};
 
+			// Wall corners: right-triangle pointing into the area at each exposed corner
+			if (bDrawWallCorners)
+			{
+				constexpr float s = 8.f;
+				auto DrawCornerTri = [&](const Vector& v, float dx, float dy)
+				{
+					const Vector p0{ v.x,         v.y,         v.z + 1.f };
+					const Vector p1{ v.x + dx * s, v.y,         v.z + 1.f };
+					const Vector p2{ v.x,         v.y + dy * s, v.z + 1.f };
+					H::Draw.RenderTriangle(p0, p1, p2, cWallCorner, false);
+					H::Draw.RenderTriangle(p0, p2, p1, cWallCorner, false);
+				};
+				if ((!isCovered(0, minX) && !isCovered(3, minY)) && !isCornerCovered2D(vNw)) DrawCornerTri(vNw,  1.f,  1.f);
+				if ((!isCovered(0, maxX) && !isCovered(1, minY)) && !isCornerCovered2D(vNe)) DrawCornerTri(vNe, -1.f,  1.f);
+				if ((!isCovered(2, minX) && !isCovered(3, maxY)) && !isCornerCovered2D(vSw)) DrawCornerTri(vSw,  1.f, -1.f);
+				if ((!isCovered(2, maxX) && !isCovered(1, maxY)) && !isCornerCovered2D(vSe)) DrawCornerTri(vSe, -1.f, -1.f);
+			}
 			// Draw portals (shared X/Y overlap on A's edge, Z interpolated)
 			if (bDrawPortals && cPortal.a)
 			{
@@ -2393,24 +2375,6 @@ void CNavEngine::Render()
 						H::Draw.RenderLine(vP0, vP1, cPortal, false);
 					}
 				}
-			}
-
-			// Wall corners: right-triangle pointing into the area at each exposed corner
-			if (bDrawWallCorners)
-			{
-				constexpr float s = 8.f;
-				auto DrawCornerTri = [&](const Vector& v, float dx, float dy)
-				{
-					const Vector p0{ v.x,         v.y,         v.z + 1.f };
-					const Vector p1{ v.x + dx * s, v.y,         v.z + 1.f };
-					const Vector p2{ v.x,         v.y + dy * s, v.z + 1.f };
-					H::Draw.RenderTriangle(p0, p1, p2, cWallCorner, false);
-					H::Draw.RenderTriangle(p0, p2, p1, cWallCorner, false);
-				};
-				if (!isCovered(0, minX) || !isCovered(3, minY) || !isCornerCovered2D(vNw)) DrawCornerTri(vNw,  1.f,  1.f);
-				if (!isCovered(0, maxX) || !isCovered(1, minY) || !isCornerCovered2D(vNe)) DrawCornerTri(vNe, -1.f,  1.f);
-				if (!isCovered(2, minX) || !isCovered(3, maxY) || !isCornerCovered2D(vSw)) DrawCornerTri(vSw,  1.f, -1.f);
-				if (!isCovered(2, maxX) || !isCovered(1, maxY) || !isCornerCovered2D(vSe)) DrawCornerTri(vSe, -1.f, -1.f);
 			}
 		}
 	}

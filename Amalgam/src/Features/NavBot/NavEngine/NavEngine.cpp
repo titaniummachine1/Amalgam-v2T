@@ -925,12 +925,12 @@ void CNavEngine::VischeckPath()
 	// Iterate all the crumbs
 	for (auto it = m_vCrumbs.begin(), next = it + 1; next != m_vCrumbs.end(); it++, next++)
 	{
-		auto tCrumb = *it;
-		auto tNextCrumb = *next;
+		const auto& tCrumb = *it;
+		const auto& tNextCrumb = *next;
 		auto tKey = std::pair<CNavArea*, CNavArea*>(tCrumb.m_pNavArea, tNextCrumb.m_pNavArea);
 
-		auto vCurrentCenter = tCrumb.m_vPos;
-		auto vNextCenter = tNextCrumb.m_vPos;
+		const auto& vCurrentCenter = tCrumb.m_vPos;
+		const auto& vNextCenter = tNextCrumb.m_vPos;
 
 		// Check if we have a valid cache entry
 		if (m_pMap->m_mVischeckCache.count(tKey))
@@ -1501,7 +1501,7 @@ void CNavEngine::UpdateRespawnRooms()
 	if (!m_vRespawnRooms.empty() && m_pMap)
 	{
 		std::unordered_set<CNavArea*> setSpawnRoomAreas;
-		for (auto tRespawnRoom : m_vRespawnRooms)
+		for (const auto& tRespawnRoom : m_vRespawnRooms)
 		{
 			static Vector vStepHeight(0.0f, 0.0f, 18.0f);
 			for (auto& tArea : m_pMap->m_navfile.m_vAreas)
@@ -1552,7 +1552,7 @@ void CNavEngine::CancelPath()
 	m_vLastLookTarget = {};
 }
 
-bool CanJumpIfScoped(CTFPlayer* pLocal, CTFWeaponBase* pWeapon)
+static bool CanJumpIfScoped(CTFPlayer* pLocal, CTFWeaponBase* pWeapon)
 {
 	// You can still jump if youre scoped in water
 	if (pLocal->m_fFlags() & FL_INWATER)
@@ -1569,7 +1569,7 @@ void CNavEngine::FollowCrumbs(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCm
 
 	size_t uCrumbsSize = m_vCrumbs.size();
 
-	const auto vLocalOrigin = pLocal->GetAbsOrigin();
+	const Vector vLocalOrigin = pLocal->GetAbsOrigin();
 	if (!uCrumbsSize && m_tOffMeshTimer.Check(6000))
 	{
 		m_eCurrentPriority = PriorityListEnum::Patrol;
@@ -2066,88 +2066,84 @@ void CNavEngine::Render()
 				H::Draw.RenderLine(vSw, vNw, cOutline, false);
 			}
 
-			// Per-edge: track whether any portal reaches min/max end
-			// Dir 0=North(X), 1=East(Y), 2=South(X), 3=West(Y)
-			bool bEdgeReachesMin[4] = {};
-			bool bEdgeReachesMax[4] = {};
-			constexpr float fEps = 2.f;
-
-			for (int iDir = 0; iDir < 4; iDir++)
+			// isCovered: does any neighbor in iDir have its own axis range covering coord?
+			// Dir 0=North(X axis), 1=East(Y axis), 2=South(X axis), 3=West(Y axis)
+			// Matches Lua WallCornerGenerator checkPointOnNeighborBoundary logic
+			constexpr float fTol = 2.f;
+			auto isCovered = [&](int iDir, float coord) -> bool
 			{
 				const bool bAxisX = (iDir == 0 || iDir == 2);
-				const float edgeMin = bAxisX ? minX : minY;
-				const float edgeMax = bAxisX ? maxX : maxY;
-
-				for (auto& conn : pArea->m_vConnectionsDir[iDir])
+				for (const auto& conn : pArea->m_vConnectionsDir[iDir])
 				{
 					if (!conn.m_pArea) continue;
 					const CNavArea* pB = conn.m_pArea;
-					const float bMinX = pB->m_vNwCorner.x, bMaxX = pB->m_vSeCorner.x;
-					const float bMinY = pB->m_vNwCorner.y, bMaxY = pB->m_vSeCorner.y;
+					const float bMin = bAxisX ? pB->m_vNwCorner.x : pB->m_vNwCorner.y;
+					const float bMax = bAxisX ? pB->m_vSeCorner.x : pB->m_vSeCorner.y;
+					if (coord >= bMin - fTol && coord <= bMax + fTol)
+						return true;
+				}
+				return false;
+			};
 
-					float oMin, oMax;
-					if (bAxisX) { oMin = std::max(minX, bMinX); oMax = std::min(maxX, bMaxX); }
-					else        { oMin = std::max(minY, bMinY); oMax = std::min(maxY, bMaxY); }
-					if (oMax <= oMin) continue;
+			// Draw portals (shared X/Y overlap on A's edge, Z interpolated)
+			if (cPortal.a)
+			{
+				for (int iDir = 0; iDir < 4; iDir++)
+				{
+					const bool bAxisX = (iDir == 0 || iDir == 2);
+					for (const auto& conn : pArea->m_vConnectionsDir[iDir])
+					{
+						if (!conn.m_pArea) continue;
+						const CNavArea* pB = conn.m_pArea;
+						float oMin, oMax;
+						if (bAxisX) { oMin = std::max(minX, pB->m_vNwCorner.x); oMax = std::min(maxX, pB->m_vSeCorner.x); }
+						else        { oMin = std::max(minY, pB->m_vNwCorner.y); oMax = std::min(maxY, pB->m_vSeCorner.y); }
+						if (oMax <= oMin) continue;
 
-					if (oMin <= edgeMin + fEps) bEdgeReachesMin[iDir] = true;
-					if (oMax >= edgeMax - fEps) bEdgeReachesMax[iDir] = true;
-
-					if (!cPortal.a) continue;
-
-					// Compute portal endpoints with Z interpolated on A's edge
-					Vector vP0, vP1;
-					if (iDir == 0) // North: at Y=minY, NW->NE
-					{
-						float t0 = dX > 0 ? (oMin - minX) / dX : 0.f;
-						float t1 = dX > 0 ? (oMax - minX) / dX : 0.f;
-						vP0 = { oMin, minY, zNW + t0 * (zNE - zNW) + 2.f };
-						vP1 = { oMax, minY, zNW + t1 * (zNE - zNW) + 2.f };
+						Vector vP0, vP1;
+						if (iDir == 0)
+						{
+							float t0 = dX > 0 ? (oMin - minX) / dX : 0.f, t1 = dX > 0 ? (oMax - minX) / dX : 0.f;
+							vP0 = { oMin, minY, zNW + t0 * (zNE - zNW) + 2.f };
+							vP1 = { oMax, minY, zNW + t1 * (zNE - zNW) + 2.f };
+						}
+						else if (iDir == 1)
+						{
+							float t0 = dY > 0 ? (oMin - minY) / dY : 0.f, t1 = dY > 0 ? (oMax - minY) / dY : 0.f;
+							vP0 = { maxX, oMin, zNE + t0 * (zSE - zNE) + 2.f };
+							vP1 = { maxX, oMax, zNE + t1 * (zSE - zNE) + 2.f };
+						}
+						else if (iDir == 2)
+						{
+							float t0 = dX > 0 ? (oMin - minX) / dX : 0.f, t1 = dX > 0 ? (oMax - minX) / dX : 0.f;
+							vP0 = { oMin, maxY, zSW + t0 * (zSE - zSW) + 2.f };
+							vP1 = { oMax, maxY, zSW + t1 * (zSE - zSW) + 2.f };
+						}
+						else
+						{
+							float t0 = dY > 0 ? (oMin - minY) / dY : 0.f, t1 = dY > 0 ? (oMax - minY) / dY : 0.f;
+							vP0 = { minX, oMin, zNW + t0 * (zSW - zNW) + 2.f };
+							vP1 = { minX, oMax, zNW + t1 * (zSW - zNW) + 2.f };
+						}
+						H::Draw.RenderLine(vP0, vP1, cPortal, false);
+						vP0.z += 1.f; vP1.z += 1.f;
+						H::Draw.RenderLine(vP0, vP1, cPortal, false);
 					}
-					else if (iDir == 1) // East: at X=maxX, NE->SE
-					{
-						float t0 = dY > 0 ? (oMin - minY) / dY : 0.f;
-						float t1 = dY > 0 ? (oMax - minY) / dY : 0.f;
-						vP0 = { maxX, oMin, zNE + t0 * (zSE - zNE) + 2.f };
-						vP1 = { maxX, oMax, zNE + t1 * (zSE - zNE) + 2.f };
-					}
-					else if (iDir == 2) // South: at Y=maxY, SW->SE
-					{
-						float t0 = dX > 0 ? (oMin - minX) / dX : 0.f;
-						float t1 = dX > 0 ? (oMax - minX) / dX : 0.f;
-						vP0 = { oMin, maxY, zSW + t0 * (zSE - zSW) + 2.f };
-						vP1 = { oMax, maxY, zSW + t1 * (zSE - zSW) + 2.f };
-					}
-					else // West: at X=minX, NW->SW
-					{
-						float t0 = dY > 0 ? (oMin - minY) / dY : 0.f;
-						float t1 = dY > 0 ? (oMax - minY) / dY : 0.f;
-						vP0 = { minX, oMin, zNW + t0 * (zSW - zNW) + 2.f };
-						vP1 = { minX, oMax, zNW + t1 * (zSW - zNW) + 2.f };
-					}
-					H::Draw.RenderLine(vP0, vP1, cPortal, false);
-					// Draw twice offset by 1 in Z for visual thickness
-					vP0.z += 1.f; vP1.z += 1.f;
-					H::Draw.RenderLine(vP0, vP1, cPortal, false);
 				}
 			}
 
-			// Outside corners: corner is outside if BOTH adjacent edges have no portal reaching it
+			// Wall corners: corner exposed on EITHER adjacent edge (Lua: not hasDir1 OR not hasDir2)
 			if (cWallCorner.a)
 			{
-				const Vector vCornerBox(-4.f, -4.f, -4.f), vCornerBoxMax(4.f, 4.f, 4.f);
-				// NW: North min + West min
-				if (!bEdgeReachesMin[0] && !bEdgeReachesMin[3])
-					H::Draw.RenderBox(vNw, vCornerBox, vCornerBoxMax, Vector(), cWallCorner, false);
-				// NE: North max + East min
-				if (!bEdgeReachesMax[0] && !bEdgeReachesMin[1])
-					H::Draw.RenderBox(vNe, vCornerBox, vCornerBoxMax, Vector(), cWallCorner, false);
-				// SW: South min + West max
-				if (!bEdgeReachesMin[2] && !bEdgeReachesMax[3])
-					H::Draw.RenderBox(vSw, vCornerBox, vCornerBoxMax, Vector(), cWallCorner, false);
-				// SE: South max + East max
-				if (!bEdgeReachesMax[2] && !bEdgeReachesMax[1])
-					H::Draw.RenderBox(vSe, vCornerBox, vCornerBoxMax, Vector(), cWallCorner, false);
+				const Vector vCB(-4.f, -4.f, -4.f), vCBMax(4.f, 4.f, 4.f);
+				if (!isCovered(0, minX) || !isCovered(3, minY)) // NW
+					H::Draw.RenderBox(vNw, vCB, vCBMax, Vector(), cWallCorner, false);
+				if (!isCovered(0, maxX) || !isCovered(1, minY)) // NE
+					H::Draw.RenderBox(vNe, vCB, vCBMax, Vector(), cWallCorner, false);
+				if (!isCovered(2, minX) || !isCovered(3, maxY)) // SW
+					H::Draw.RenderBox(vSw, vCB, vCBMax, Vector(), cWallCorner, false);
+				if (!isCovered(2, maxX) || !isCovered(1, maxY)) // SE
+					H::Draw.RenderBox(vSe, vCB, vCBMax, Vector(), cWallCorner, false);
 			}
 		}
 	}

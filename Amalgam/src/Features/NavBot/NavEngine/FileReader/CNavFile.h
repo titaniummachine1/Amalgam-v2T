@@ -2,6 +2,7 @@
 #include "nav.h"
 #include <fstream>
 #include <filesystem>
+#include <unordered_map>
 
 class CNavFile
 {
@@ -306,12 +307,27 @@ public:
 		// Fill connection for every area with their area ptrs instead of IDs
 		// This will come in handy in path finding
 
+		// Build an ID->area map for O(N) resolution instead of O(N^2)
+		std::unordered_map<uint32_t, CNavArea*> mAreaById;
+		mAreaById.reserve(m_vAreas.size());
+		for (auto& area : m_vAreas)
+			mAreaById[area.m_uId] = &area;
+
 		for (auto& tArea : m_vAreas)
 		{
 			for (auto& connection : tArea.m_vConnections)
-				for (auto& connected_area : m_vAreas)
-					if (connection.m_uId == connected_area.m_uId)
-						connection.m_pArea = &connected_area;
+			{
+				auto it = mAreaById.find(connection.m_uId);
+				if (it != mAreaById.end())
+					connection.m_pArea = it->second;
+			}
+			for (int iDir = 0; iDir < 4; iDir++)
+				for (auto& connection : tArea.m_vConnectionsDir[iDir])
+				{
+					auto it = mAreaById.find(connection.m_uId);
+					if (it != mAreaById.end())
+						connection.m_pArea = it->second;
+				}
 
 			// Fill potentially visible areas as well
 			for (auto& bindinfo : tArea.m_vPotentiallyVisibleAreas)

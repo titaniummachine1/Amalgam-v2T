@@ -624,7 +624,7 @@ bool CNavEngine::NavTo(const Vector& vDestination, PriorityListEnum::PriorityLis
 		return false;
 	}
 
-	CNavArea* pDestArea = FindClosestNavArea(vDestination, false);
+	CNavArea* pDestArea = FindClosestNavArea(vDestination);
 	if (!pDestArea)
 	{
 		m_sLastFailureReason = "No destination nav area";
@@ -881,7 +881,7 @@ float CNavEngine::GetPathCost(const Vector& vLocalOrigin, const Vector& vDestina
 	if (!GetLocalNavArea(vLocalOrigin))
 		return FLT_MAX;
 
-	auto pDestArea = FindClosestNavArea(vDestination, false);
+	auto pDestArea = FindClosestNavArea(vDestination);
 	if (!pDestArea)
 		return FLT_MAX;
 

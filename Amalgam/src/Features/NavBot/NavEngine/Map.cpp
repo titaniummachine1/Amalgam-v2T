@@ -615,7 +615,7 @@ void CMap::CollectAreasAround(const Vector& vOrigin, float flRadius, std::vector
 {
 	vOutAreas.clear();
 
-	CNavArea* pSeedArea = FindClosestNavArea(vOrigin, false);
+	CNavArea* pSeedArea = FindClosestNavArea(vOrigin);
 	if (!pSeedArea)
 		return;
 
@@ -700,43 +700,11 @@ void CMap::ApplyBlacklistAround(const Vector& vOrigin, float flRadius, const Bla
 	}
 }
 
-CNavArea* CMap::FindClosestNavArea(const Vector& vPos, bool bLocalOrigin)
+CNavArea* CMap::FindClosestNavArea(const Vector& vPos)
 {
 	std::lock_guard lock(m_mutex);
 
-	FindAreaResult tResult = m_kdTree.FindArea(vPos);
-
-	if (tResult.bIsExact)
-		return tResult.pArea;
-
-	if (!bLocalOrigin)
-		return tResult.pArea;
-
-	// bLocalOrigin: among XY-overlapping areas pick the one with best vertical score
-	CNavArea* pBestOverlapArea = nullptr;
-	float flBestOverlapScore = FLT_MAX;
-
-	for (auto& tArea : m_navfile.m_vAreas)
-	{
-		if (!tArea.IsOverlapping(vPos))
-			continue;
-
-		const float flVerticalToArea = std::fabs(tArea.GetZ(vPos.x, vPos.y) - vPos.z);
-		float flOverlapScore = flVerticalToArea;
-
-		if (vPos.z < (tArea.m_flMinZ - PLAYER_CROUCHED_JUMP_HEIGHT))
-			flOverlapScore += PLAYER_HEIGHT;
-		if (vPos.z > (tArea.m_flMaxZ + PLAYER_CROUCHED_JUMP_HEIGHT))
-			flOverlapScore += PLAYER_HEIGHT * 0.5f;
-
-		if (flOverlapScore < flBestOverlapScore)
-		{
-			flBestOverlapScore = flOverlapScore;
-			pBestOverlapArea = &tArea;
-		}
-	}
-
-	return pBestOverlapArea ? pBestOverlapArea : tResult.pArea;
+	return m_kdTree.FindArea(vPos).pArea;
 }
 
 void CMap::UpdateIgnores(CTFPlayer* pLocal)

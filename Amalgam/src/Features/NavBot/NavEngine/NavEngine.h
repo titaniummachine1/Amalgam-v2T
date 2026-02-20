@@ -118,7 +118,7 @@ public:
 
 	std::vector<CNavArea*>* GetRespawnRoomExitAreas() { return &m_vRespawnRoomExitAreas; }
 
-	CNavArea* FindClosestNavArea(const Vector vOrigin, bool bLocalOrigin = true) { return m_pMap->FindClosestNavArea(vOrigin, bLocalOrigin); }
+	CNavArea* FindClosestNavArea(const Vector vOrigin) { return m_pMap->FindClosestNavArea(vOrigin); }
 	CNavArea* GetLocalNavArea() const { return m_pLocalArea; }
 	CNavFile* GetNavFile() { return &m_pMap->m_navfile; }
 	CMap* GetNavMap() { return m_pMap.get(); }

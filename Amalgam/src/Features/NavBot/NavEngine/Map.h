@@ -155,7 +155,7 @@ private:
 public:
 
 	// Get closest nav area to target vector
-	CNavArea* FindClosestNavArea(const Vector& vPos, bool bLocalOrigin);
+	CNavArea* FindClosestNavArea(const Vector& vPos);
 
 	bool IsAreaValid(CNavArea* pArea) const
 	{

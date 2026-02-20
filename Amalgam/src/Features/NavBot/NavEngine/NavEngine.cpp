@@ -1177,7 +1177,7 @@ static bool NavMarchSegment(
 		if (vTo.x >= pCur->m_vNwCorner.x - kTol && vTo.x <= pCur->m_vSeCorner.x + kTol &&
 			vTo.y >= pCur->m_vNwCorner.y - kTol && vTo.y <= pCur->m_vSeCorner.y + kTol)
 		{
-			return CNavEngine::IsPlayerPassableNavigation(pLocal, vPos, vTo);
+			return F::NavEngine.IsPlayerPassableNavigation(pLocal, vPos, vTo);
 		}
 
 		// Find where ray exits current area AABB in XY
@@ -1198,7 +1198,7 @@ static bool NavMarchSegment(
 		const Vector vExit = { eX, eY, pCur->GetZ(eX, eY) };
 
 		// Hull trace for this crossing step
-		if (!CNavEngine::IsPlayerPassableNavigation(pLocal, vPos, vExit))
+		if (!F::NavEngine.IsPlayerPassableNavigation(pLocal, vPos, vExit))
 			return false;
 
 		// Find neighbor at exit
@@ -1220,7 +1220,7 @@ static bool NavMarchSegment(
 		}
 
 		if (!pNext)
-			return CNavEngine::IsPlayerPassableNavigation(pLocal, vPos, vTo);
+			return F::NavEngine.IsPlayerPassableNavigation(pLocal, vPos, vTo);
 
 		if (pOutCrumbs)
 		{
@@ -1234,7 +1234,7 @@ static bool NavMarchSegment(
 		pCur = pNext;
 	}
 
-	return CNavEngine::IsPlayerPassableNavigation(pLocal, vPos, vTo);
+	return F::NavEngine.IsPlayerPassableNavigation(pLocal, vPos, vTo);
 }
 
 void CNavEngine::VischeckPath()

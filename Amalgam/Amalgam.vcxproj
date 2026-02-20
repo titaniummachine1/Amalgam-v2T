@@ -329,7 +329,7 @@
     <IntDir>$(SolutionDir)build\$(Platform)\$(Configuration)\</IntDir>
     <TargetName>$(ProjectName)$(Platform)$(Configuration)</TargetName>
     <OutDir>$(SolutionDir)output\$(Platform)\$(Configuration)\</OutDir>
-    <LinkIncremental>false</LinkIncremental>
+    <LinkIncremental>true</LinkIncremental>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseTextmode|x64'">
     <IncludePath>$(ProjectDir)include\;$(IncludePath)</IncludePath>

@@ -802,8 +802,8 @@ I dont think this is a good idea to disable simulations completely:
 				CVar(DisableOnSpectate, "Disable on spectate", false);
 				CVar(PathInSetup, "Path in setup time", false);
 				CVarEnum(Draw, "Draw", 0b011, VISUAL | DROPDOWN_MULTI, nullptr,
-					VA_LIST("Path", "Areas", "Blacklisted zones", "Possible paths", "Walkable (Debug)"),
-					Path = 1 << 0, Area = 1 << 1, Blacklist = 1 << 2, PossiblePaths = 1 << 3, Walkable = 1 << 4);
+					VA_LIST("Path", "Areas", "Blacklisted zones", "Possible paths", "Walkable (Debug)", "Path arrows", "Flood fill areas"),
+					Path = 1 << 0, Area = 1 << 1, Blacklist = 1 << 2, PossiblePaths = 1 << 3, Walkable = 1 << 4, PathArrows = 1 << 5, FloodFill = 1 << 6);
 				CVarEnum(LookAtPath, "Look at path", 0, NONE, nullptr,
 					VA_LIST("Off", "Plain", "Silent", "Legit", "Legit silent"),
 					Off, Plain, Silent, Legit, LegitSilent);

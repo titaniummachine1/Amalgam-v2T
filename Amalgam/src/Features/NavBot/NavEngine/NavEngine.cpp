@@ -2002,6 +2002,56 @@ void CNavEngine::Render()
 			H::Draw.RenderLine(m_vCrumbs[i].m_vPos, m_vCrumbs[i + 1].m_vPos, Vars::Colors::NavbotPath.Value, false);
 	}
 
+	if (Vars::Misc::Movement::NavEngine::Draw.Value & Vars::Misc::Movement::NavEngine::DrawEnum::PathArrows && !m_vCrumbs.empty())
+	{
+		const Color_t cArrow = Vars::Colors::NavbotPath.Value;
+		constexpr float flHeadLen = 12.f;
+		constexpr float flHeadWidth = 6.f;
+		for (size_t i = 0; i < m_vCrumbs.size() - 1; i++)
+		{
+			const Vector& vFrom = m_vCrumbs[i].m_vPos;
+			const Vector& vTo   = m_vCrumbs[i + 1].m_vPos;
+			H::Draw.RenderLine(vFrom, vTo, cArrow, false);
+
+			// Arrowhead: compute perpendicular in XY plane
+			Vector vDir = vTo - vFrom;
+			const float flLen = vDir.Length();
+			if (flLen < 1.f)
+				continue;
+			vDir /= flLen;
+
+			// Right-hand perpendicular in XY, keep Z flat
+			const Vector vRight(vDir.y, -vDir.x, 0.f);
+
+			// Tip is at vTo, base is flHeadLen back along vDir
+			const Vector vBase = vTo - vDir * flHeadLen;
+			const Vector vLeft  = vBase - vRight * flHeadWidth;
+			const Vector vRight2 = vBase + vRight * flHeadWidth;
+
+			H::Draw.RenderTriangle(vTo, vLeft, vRight2, cArrow, false);
+		}
+	}
+
+	if (Vars::Misc::Movement::NavEngine::Draw.Value & Vars::Misc::Movement::NavEngine::DrawEnum::FloodFill && m_pLocalArea && m_pMap)
+	{
+		constexpr float flFloodRadius = 800.f;
+		std::vector<CNavArea*> vNearby;
+		{
+			std::lock_guard lock(m_pMap->m_mutex);
+			m_pMap->CollectAreasAround(m_pLocalArea->m_vCenter, flFloodRadius, vNearby);
+		}
+		const Color_t cFlood = Vars::Colors::NavbotArea.Value;
+		for (auto pArea : vNearby)
+		{
+			if (!pArea)
+				continue;
+			H::Draw.RenderLine(pArea->m_vNwCorner,  pArea->GetNeCorner(), cFlood, false);
+			H::Draw.RenderLine(pArea->GetNeCorner(), pArea->m_vSeCorner,  cFlood, false);
+			H::Draw.RenderLine(pArea->m_vSeCorner,  pArea->GetSwCorner(), cFlood, false);
+			H::Draw.RenderLine(pArea->GetSwCorner(), pArea->m_vNwCorner,  cFlood, false);
+		}
+	}
+
 	if (Vars::Misc::Movement::NavEngine::Draw.Value & Vars::Misc::Movement::NavEngine::DrawEnum::PossiblePaths)
 	{
 		for (auto& tPath : m_vPossiblePaths)

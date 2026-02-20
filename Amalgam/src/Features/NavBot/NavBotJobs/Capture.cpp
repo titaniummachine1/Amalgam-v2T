@@ -89,6 +89,20 @@ bool CNavBotCapture::GetCtfGoal(CTFPlayer* pLocal, int iOurTeam, int iEnemyTeam,
 				vOut = vPosition;
 				return true;
 			}
+			// Fallback: find our team's capture zone entity directly
+			for (auto pEntity : H::Entities.GetGroup(EntityEnum::WorldObjective))
+			{
+				if (pEntity->GetClassID() != ETFClassID::CCaptureZone)
+					continue;
+				if (pEntity->IsDormant())
+					continue;
+				int iZoneTeam = pEntity->m_iTeamNum();
+				if (iZoneTeam != 0 && iZoneTeam != iOurTeam)
+					continue;
+				m_sCaptureStatus = L"CP";
+				vOut = pEntity->GetAbsOrigin();
+				return true;
+			}
 		}
 		// Assist with capturing
 		else if (Vars::Misc::Movement::NavBot::Preferences.Value & Vars::Misc::Movement::NavBot::PreferencesEnum::HelpCaptureObjectives)

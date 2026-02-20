@@ -2283,21 +2283,22 @@ void CNavEngine::Render()
 				H::Draw.RenderLine(vSw, vNw, cOutline, false);
 			}
 
-			// isCovered: does any neighbor in iDir have its own axis range covering coord?
-			// Dir 0=North(X axis), 1=East(Y axis), 2=South(X axis), 3=West(Y axis)
-			// Matches Lua WallCornerGenerator checkPointOnNeighborBoundary logic
+			// isCornerCovered: true if any neighbor area's 2D XY box contains the corner point.
+			// This catches both simple exposed corners AND convex corners where two axis-neighbors
+			// each cover one axis but no single area covers the 2D corner.
 			constexpr float fTol = 2.f;
-			auto isCovered = [&](int iDir, float coord) -> bool
+			auto isCornerCovered = [&](const Vector& vCorner) -> bool
 			{
-				const bool bAxisX = (iDir == 0 || iDir == 2);
-				for (const auto& conn : pArea->m_vConnectionsDir[iDir])
+				for (int iDir = 0; iDir < 4; iDir++)
 				{
-					if (!conn.m_pArea) continue;
-					const CNavArea* pB = conn.m_pArea;
-					const float bMin = bAxisX ? pB->m_vNwCorner.x : pB->m_vNwCorner.y;
-					const float bMax = bAxisX ? pB->m_vSeCorner.x : pB->m_vSeCorner.y;
-					if (coord >= bMin - fTol && coord <= bMax + fTol)
-						return true;
+					for (const auto& conn : pArea->m_vConnectionsDir[iDir])
+					{
+						if (!conn.m_pArea) continue;
+						const CNavArea* pB = conn.m_pArea;
+						if (vCorner.x >= pB->m_vNwCorner.x - fTol && vCorner.x <= pB->m_vSeCorner.x + fTol &&
+							vCorner.y >= pB->m_vNwCorner.y - fTol && vCorner.y <= pB->m_vSeCorner.y + fTol)
+							return true;
+					}
 				}
 				return false;
 			};
@@ -2361,10 +2362,10 @@ void CNavEngine::Render()
 					H::Draw.RenderTriangle(p0, p1, p2, cWallCorner, false);
 					H::Draw.RenderTriangle(p0, p2, p1, cWallCorner, false);
 				};
-				if (!isCovered(0, minX) || !isCovered(3, minY)) DrawCornerTri(vNw, -1.f, -1.f);
-				if (!isCovered(0, maxX) || !isCovered(1, minY)) DrawCornerTri(vNe,  1.f, -1.f);
-				if (!isCovered(2, minX) || !isCovered(3, maxY)) DrawCornerTri(vSw, -1.f,  1.f);
-				if (!isCovered(2, maxX) || !isCovered(1, maxY)) DrawCornerTri(vSe,  1.f,  1.f);
+				if (!isCornerCovered(vNw)) DrawCornerTri(vNw,  1.f,  1.f);
+				if (!isCornerCovered(vNe)) DrawCornerTri(vNe, -1.f,  1.f);
+				if (!isCornerCovered(vSw)) DrawCornerTri(vSw,  1.f, -1.f);
+				if (!isCornerCovered(vSe)) DrawCornerTri(vSe, -1.f, -1.f);
 			}
 		}
 	}

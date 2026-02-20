@@ -530,15 +530,25 @@ static bool ComputePortal(CNavArea* pFrom, CNavArea* pTo, NavPortal_t& tOut)
 		else
 		{
 			tOut.bForced = false;
+			Vector vP1, vP2;
 			if (bAxisX)
 			{
-				tOut.vLeft  = { flInsetMin, flEdge, pFrom->GetZ(flInsetMin, flEdge) };
-				tOut.vRight = { flInsetMax, flEdge, pFrom->GetZ(flInsetMax, flEdge) };
+				vP1 = { flInsetMin, flEdge, pFrom->GetZ(flInsetMin, flEdge) };
+				vP2 = { flInsetMax, flEdge, pFrom->GetZ(flInsetMax, flEdge) };
 			}
 			else
 			{
-				tOut.vLeft  = { flEdge, flInsetMin, pFrom->GetZ(flEdge, flInsetMin) };
-				tOut.vRight = { flEdge, flInsetMax, pFrom->GetZ(flEdge, flInsetMax) };
+				vP1 = { flEdge, flInsetMin, pFrom->GetZ(flEdge, flInsetMin) };
+				vP2 = { flEdge, flInsetMax, pFrom->GetZ(flEdge, flInsetMax) };
+			}
+			// Orient left/right relative to travel direction from pFrom to pTo.
+			// Right-perpendicular in XY: (-dy, dx). Higher right-projection = more to the right.
+			{
+				const Vector vTravel = pTo->m_vCenter - pFrom->m_vCenter;
+				const float fD1 = vP1.x * (-vTravel.y) + vP1.y * vTravel.x;
+				const float fD2 = vP2.x * (-vTravel.y) + vP2.y * vTravel.x;
+				if (fD1 <= fD2) { tOut.vLeft = vP1; tOut.vRight = vP2; }
+				else             { tOut.vLeft = vP2; tOut.vRight = vP1; }
 			}
 		}
 		return true;
@@ -977,11 +987,32 @@ bool CNavEngine::NavTo(const Vector& vDestination, PriorityListEnum::PriorityLis
 		if (auto pLP = H::Entities.GetLocal(); pLP && pLP->IsAlive())
 			vSSFAStart = pLP->GetAbsOrigin();
 
-		for (auto& tCrumb : RunSSFA(vSSFAStart, vDestination, vPortals))
+		constexpr float kSubdivideSpacing = 160.f;
+		auto vSSFACrumbs = RunSSFA(vSSFAStart, vDestination, vPortals);
+		Vector vPrev = vSSFAStart;
+		for (const auto& tCrumb : vSSFACrumbs)
 		{
-			if (!m_vCrumbs.empty() && m_vCrumbs.back().m_vPos.DistToSqr(tCrumb.m_vPos) < 1.f)
-				continue;
-			m_vCrumbs.push_back(tCrumb);
+			// Subdivide long segments so the bot's stuck-detection fires correctly
+			Vector vDelta = tCrumb.m_vPos - vPrev;
+			const float flDist2D = Vector(vDelta.x, vDelta.y, 0.f).Length();
+			if (flDist2D > kSubdivideSpacing)
+			{
+				const int nSteps = static_cast<int>(flDist2D / kSubdivideSpacing);
+				for (int s = 1; s < nSteps; s++)
+				{
+					const float t = static_cast<float>(s) / static_cast<float>(nSteps);
+					Crumb_t tMid{};
+					tMid.m_vPos     = vPrev + vDelta * t;
+					tMid.m_pNavArea = tCrumb.m_pNavArea;
+					if (tMid.m_pNavArea)
+						tMid.m_vPos.z = tMid.m_pNavArea->GetZ(tMid.m_vPos.x, tMid.m_vPos.y);
+					if (m_vCrumbs.empty() || m_vCrumbs.back().m_vPos.DistToSqr(tMid.m_vPos) >= 1.f)
+						m_vCrumbs.push_back(tMid);
+				}
+			}
+			if (m_vCrumbs.empty() || m_vCrumbs.back().m_vPos.DistToSqr(tCrumb.m_vPos) >= 1.f)
+				m_vCrumbs.push_back(tCrumb);
+			vPrev = tCrumb.m_vPos;
 		}
 	}
 
@@ -1543,9 +1574,6 @@ void CNavEngine::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 	if (Vars::Misc::Movement::NavEngine::DisableOnSpectate.Value && H::Entities.IsSpectated())
 		return;
 
-	if (!m_bUpdatedRespawnRooms)
-		UpdateRespawnRooms();
-
 	if (!pLocal->IsAlive() || F::FollowBot.m_bActive)
 	{
 		CancelPath();
@@ -1650,7 +1678,8 @@ void CNavEngine::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 						tPoints.m_vCenter = tDropdown.m_vAdjustedPos;
 
 						bool bPassable = IsPlayerPassableNavigation(pLocal, tPoints.m_vCurrent, tPoints.m_vCenter) &&
-							IsPlayerPassableNavigation(pLocal, tPoints.m_vCenter, tPoints.m_vNext);
+							(IsPlayerPassableNavigation(pLocal, tPoints.m_vCenter, tPoints.m_vNext)
+								|| IsPlayerPassableNavigation(pLocal, tPoints.m_vCurrent, tPoints.m_vNext));
 
 						// Cache it
 						CachedConnection_t& tEntry = m_pMap->m_mVischeckCache[tKey];
@@ -2283,11 +2312,27 @@ void CNavEngine::Render()
 				H::Draw.RenderLine(vSw, vNw, cOutline, false);
 			}
 
-			// isCornerCovered: true if any neighbor area's 2D XY box contains the corner point.
-			// This catches both simple exposed corners AND convex corners where two axis-neighbors
-			// each cover one axis but no single area covers the 2D corner.
+			// isCovered: does any neighbor in iDir have its axis range covering coord?
+			// Dir 0=North(X axis), 1=East(Y axis), 2=South(X axis), 3=West(Y axis)
 			constexpr float fTol = 2.f;
-			auto isCornerCovered = [&](const Vector& vCorner) -> bool
+			auto isCovered = [&](int iDir, float coord) -> bool
+			{
+				const bool bAxisX = (iDir == 0 || iDir == 2);
+				for (const auto& conn : pArea->m_vConnectionsDir[iDir])
+				{
+					if (!conn.m_pArea) continue;
+					const CNavArea* pB = conn.m_pArea;
+					const float bMin = bAxisX ? pB->m_vNwCorner.x : pB->m_vNwCorner.y;
+					const float bMax = bAxisX ? pB->m_vSeCorner.x : pB->m_vSeCorner.y;
+					if (coord >= bMin - fTol && coord <= bMax + fTol)
+						return true;
+				}
+				return false;
+			};
+			// isCornerCovered2D: true if any neighbor's 2D XY box contains the corner point.
+			// Catches convex corners where both adjacent axis-neighbors cover their axis
+			// but no single area covers the 2D corner (the diagonal gap case).
+			auto isCornerCovered2D = [&](const Vector& vCorner) -> bool
 			{
 				for (int iDir = 0; iDir < 4; iDir++)
 				{
@@ -2362,10 +2407,10 @@ void CNavEngine::Render()
 					H::Draw.RenderTriangle(p0, p1, p2, cWallCorner, false);
 					H::Draw.RenderTriangle(p0, p2, p1, cWallCorner, false);
 				};
-				if (!isCornerCovered(vNw)) DrawCornerTri(vNw,  1.f,  1.f);
-				if (!isCornerCovered(vNe)) DrawCornerTri(vNe, -1.f,  1.f);
-				if (!isCornerCovered(vSw)) DrawCornerTri(vSw,  1.f, -1.f);
-				if (!isCornerCovered(vSe)) DrawCornerTri(vSe, -1.f, -1.f);
+				if (!isCovered(0, minX) || !isCovered(3, minY) || !isCornerCovered2D(vNw)) DrawCornerTri(vNw,  1.f,  1.f);
+				if (!isCovered(0, maxX) || !isCovered(1, minY) || !isCornerCovered2D(vNe)) DrawCornerTri(vNe, -1.f,  1.f);
+				if (!isCovered(2, minX) || !isCovered(3, maxY) || !isCornerCovered2D(vSw)) DrawCornerTri(vSw,  1.f, -1.f);
+				if (!isCovered(2, maxX) || !isCovered(1, maxY) || !isCornerCovered2D(vSe)) DrawCornerTri(vSe, -1.f, -1.f);
 			}
 		}
 	}

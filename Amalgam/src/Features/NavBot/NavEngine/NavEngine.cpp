@@ -473,6 +473,39 @@ static bool NavMarchSegment(CTFPlayer*, CMap*, const Vector&, const Vector&, CNa
 
 // ── Portal / SSFA helpers ────────────────────────────────────────────────────
 
+static bool IsWallCornerAtEndpoint(CNavArea* pArea, float endCoord, float areaBound, int iPerp, float flEdge, float fTol)
+{
+	if (std::abs(endCoord - areaBound) > fTol) return false;
+	const bool bPerpX = (iPerp == 0 || iPerp == 2);
+	for (const auto& pc : pArea->m_vConnectionsDir[iPerp])
+	{
+		if (!pc.m_pArea) continue;
+		const CNavArea* pN = pc.m_pArea;
+		const float nMin = bPerpX ? pN->m_vNwCorner.x : pN->m_vNwCorner.y;
+		const float nMax = bPerpX ? pN->m_vSeCorner.x : pN->m_vSeCorner.y;
+		if (flEdge >= nMin - fTol && flEdge <= nMax + fTol) return false;
+		
+		// Check diagonal neighbors of pN
+		for (int d = 0; d < 4; d++)
+		{
+			for (const auto& diagConn : pN->m_vConnectionsDir[d])
+			{
+				const CNavArea* pD = diagConn.m_pArea;
+				if (!pD || pD == pArea) continue;
+				const float dMin = bPerpX ? pD->m_vNwCorner.x : pD->m_vNwCorner.y;
+				const float dMax = bPerpX ? pD->m_vSeCorner.x : pD->m_vSeCorner.y;
+				const float dEdgeMin = bPerpX ? pD->m_vNwCorner.y : pD->m_vNwCorner.x;
+				const float dEdgeMax = bPerpX ? pD->m_vSeCorner.y : pD->m_vSeCorner.x;
+				
+				if (flEdge >= dMin - fTol && flEdge <= dMax + fTol &&
+					endCoord >= dEdgeMin - fTol && endCoord <= dEdgeMax + fTol)
+					return false;
+			}
+		}
+	}
+	return true;
+}
+
 struct NavPortal_t
 {
 	Vector    vLeft{};
@@ -498,41 +531,6 @@ static bool ComputePortal(CNavArea* pFrom, CNavArea* pTo, NavPortal_t& tOut)
 	const float minXB = pTo->m_vNwCorner.x,   maxXB = pTo->m_vSeCorner.x;
 	const float minYB = pTo->m_vNwCorner.y,   maxYB = pTo->m_vSeCorner.y;
 
-	// Per-endpoint check: inset only when the endpoint is at pFrom's own boundary
-	// AND no perpendicular neighbor covers the portal's edge coordinate.
-	auto isPortalWallCorner = [&](float endCoord, float pFromBound, int iPerp, float flEdge) -> bool
-	{
-		if (std::abs(endCoord - pFromBound) > fTol) return false;
-		const bool bPerpX = (iPerp == 0 || iPerp == 2);
-		for (const auto& pc : pFrom->m_vConnectionsDir[iPerp])
-		{
-			if (!pc.m_pArea) continue;
-			const CNavArea* pN = pc.m_pArea;
-			const float nMin = bPerpX ? pN->m_vNwCorner.x : pN->m_vNwCorner.y;
-			const float nMax = bPerpX ? pN->m_vSeCorner.x : pN->m_vSeCorner.y;
-			if (flEdge >= nMin - fTol && flEdge <= nMax + fTol) return false;
-			
-			// Check diagonal neighbors of pN
-			for (int d = 0; d < 4; d++)
-			{
-				for (const auto& diagConn : pN->m_vConnectionsDir[d])
-				{
-					const CNavArea* pD = diagConn.m_pArea;
-					if (!pD || pD == pFrom) continue;
-					const float dMin = bPerpX ? pD->m_vNwCorner.x : pD->m_vNwCorner.y;
-					const float dMax = bPerpX ? pD->m_vSeCorner.x : pD->m_vSeCorner.y;
-					const float dEdgeMin = bPerpX ? pD->m_vNwCorner.y : pD->m_vNwCorner.x;
-					const float dEdgeMax = bPerpX ? pD->m_vSeCorner.y : pD->m_vSeCorner.x;
-					
-					// If the diagonal neighbor touches the edge coordinate and overlaps the endpoint
-					if (flEdge >= dMin - fTol && flEdge <= dMax + fTol &&
-						endCoord >= dEdgeMin - fTol && endCoord <= dEdgeMax + fTol)
-						return false;
-				}
-			}
-		}
-		return true;
-	};
 	// iDir → [iPerpAtMin, iPerpAtMax]
 	static constexpr int kPerpMin[4] = { 3, 0, 3, 0 };
 	static constexpr int kPerpMax[4] = { 1, 2, 1, 2 };
@@ -551,16 +549,29 @@ static bool ComputePortal(CNavArea* pFrom, CNavArea* pTo, NavPortal_t& tOut)
 		else        { oMin = std::max(minYA, minYB); oMax = std::min(maxYA, maxYB); }
 
 		const float flEdge = (iDir == 0) ? minYA : (iDir == 1) ? maxXA : (iDir == 2) ? maxYA : minXA;
+		
 		const float pFromMin = bAxisX ? minXA : minYA;
 		const float pFromMax = bAxisX ? maxXA : maxYA;
+		const float pToMin   = bAxisX ? minXB : minYB;
+		const float pToMax   = bAxisX ? maxXB : maxYB;
 
-		const bool bInsetMin = isPortalWallCorner(oMin, pFromMin, kPerpMin[iDir], flEdge);
-		const bool bInsetMax = isPortalWallCorner(oMax, pFromMax, kPerpMax[iDir], flEdge);
+		// The opposite direction for pTo to check its walls
+		const int iOppositeDir = (iDir + 2) % 4;
+
+		const bool bInsetMinFrom = IsWallCornerAtEndpoint(pFrom, oMin, pFromMin, kPerpMin[iDir], flEdge, fTol);
+		const bool bInsetMaxFrom = IsWallCornerAtEndpoint(pFrom, oMax, pFromMax, kPerpMax[iDir], flEdge, fTol);
+		
+		const bool bInsetMinTo = IsWallCornerAtEndpoint(pTo, oMin, pToMin, kPerpMax[iOppositeDir], flEdge, fTol);
+		const bool bInsetMaxTo = IsWallCornerAtEndpoint(pTo, oMax, pToMax, kPerpMin[iOppositeDir], flEdge, fTol);
+
+		// If either side considers it a wall corner, we inset
+		const bool bInsetMin = bInsetMinFrom || bInsetMinTo;
+		const bool bInsetMax = bInsetMaxFrom || bInsetMaxTo;
 		
 		tOut.pArea = pTo;
 		
 		// If the shared overlap is too small, don't inset at all and force center
-		if (oMax - oMin <= kInset)
+		if (oMax - oMin <= 48.f)
 		{
 			const float flMid = (oMin + oMax) * 0.5f;
 			tOut.bForced = true;
@@ -597,10 +608,10 @@ static bool ComputePortal(CNavArea* pFrom, CNavArea* pTo, NavPortal_t& tOut)
 					vP2 = { flEdge, flPMax, pFrom->GetZ(flEdge, flPMax) };
 				}
 				const Vector vTravel = pTo->m_vCenter - pFrom->m_vCenter;
-				const float fD1 = vP1.x * (-vTravel.y) + vP1.y * vTravel.x;
-				const float fD2 = vP2.x * (-vTravel.y) + vP2.y * vTravel.x;
-				if (fD1 <= fD2) { tOut.vLeft = vP1; tOut.vRight = vP2; }
-				else             { tOut.vLeft = vP2; tOut.vRight = vP1; }
+				const float cross1 = vTravel.x * vP1.y - vTravel.y * vP1.x;
+				const float cross2 = vTravel.x * vP2.y - vTravel.y * vP2.x;
+				if (cross1 > cross2) { tOut.vLeft = vP1; tOut.vRight = vP2; }
+				else                 { tOut.vLeft = vP2; tOut.vRight = vP1; }
 			}
 		}
 		return true;
@@ -650,81 +661,79 @@ static std::vector<Crumb_t> RunSSFA(
 		vOut.push_back(c);
 	};
 
-	// Initialize funnel as degenerate point at start so portal[0] is handled uniformly
-	Vector vApex   = vStart;
-	Vector vFLeft  = vStart;
-	Vector vFRight = vStart;
-	int iApexIdx   = -1;
-	int iLeftIdx   = -1;
-	int iRightIdx  = -1;
-
-	const int n = (int)vPortals.size();
-
-	for (int i = 0; i <= n; i++)
+	auto RunFunnelSegment = [&](const Vector& vSegStart, const Vector& vSegGoal, int iFirstPortal, int iEndPortal, CNavArea* pGoalArea)
 	{
-		const Vector& vNewLeft  = (i < n) ? vPortals[i].vLeft  : vGoal;
-		const Vector& vNewRight = (i < n) ? vPortals[i].vRight : vGoal;
-		CNavArea* pNewArea      = (i < n) ? vPortals[i].pArea  : vPortals[n - 1].pArea;
-		const NavPortal_t* pNewPortal = (i < n) ? &vPortals[i] : nullptr;
+		Vector vApex   = vSegStart;
+		Vector vFLeft  = vSegStart;
+		Vector vFRight = vSegStart;
+		int iApexIdx   = iFirstPortal - 1;
+		int iLeftIdx   = iFirstPortal - 1;
+		int iRightIdx  = iFirstPortal - 1;
 
-		// Forced portal (narrow choke or drop): emit center directly, restart funnel
-		if (i < n && vPortals[i].bForced)
+		for (int i = iFirstPortal; i <= iEndPortal; i++)
 		{
-			Emit(vNewLeft, pNewArea, pNewPortal);
-			vApex   = vNewLeft;
-			vFLeft  = vNewLeft;
-			vFRight = vNewLeft;
-			iApexIdx = iLeftIdx = iRightIdx = i;
-			continue;
+			const Vector& vNewLeft  = (i < iEndPortal) ? vPortals[i].vLeft  : vSegGoal;
+			const Vector& vNewRight = (i < iEndPortal) ? vPortals[i].vRight : vSegGoal;
+			CNavArea* pNewArea      = (i < iEndPortal) ? vPortals[i].pArea  : pGoalArea;
+
+			// Update right side of funnel
+			if (TriArea2D(vApex, vFRight, vNewRight) <= 0.f)
+			{
+				if (vApex == vFRight || TriArea2D(vApex, vFLeft, vNewRight) > 0.f)
+				{
+					vFRight   = vNewRight;
+					iRightIdx = i;
+				}
+				else
+				{
+					Emit(vFLeft, (iLeftIdx >= iFirstPortal && iLeftIdx < iEndPortal) ? vPortals[iLeftIdx].pArea : pNewArea);
+					vApex   = vFLeft;
+					iApexIdx = iLeftIdx;
+					vFLeft  = vApex; vFRight = vApex;
+					iLeftIdx = iRightIdx = iApexIdx;
+					i = iApexIdx;
+					continue;
+				}
+			}
+
+			// Update left side of funnel
+			if (TriArea2D(vApex, vFLeft, vNewLeft) >= 0.f)
+			{
+				if (vApex == vFLeft || TriArea2D(vApex, vFRight, vNewLeft) < 0.f)
+				{
+					vFLeft   = vNewLeft;
+					iLeftIdx = i;
+				}
+				else
+				{
+					Emit(vFRight, (iRightIdx >= iFirstPortal && iRightIdx < iEndPortal) ? vPortals[iRightIdx].pArea : pNewArea);
+					vApex   = vFRight;
+					iApexIdx = iRightIdx;
+					vFLeft  = vApex; vFRight = vApex;
+					iLeftIdx = iRightIdx = iApexIdx;
+					i = iApexIdx;
+					continue;
+				}
+			}
 		}
+	};
 
-		// Update right side of funnel
-		if (TriArea2D(vApex, vFRight, vNewRight) <= 0.f)
-		{
-			if (vApex == vFRight || TriArea2D(vApex, vFLeft, vNewRight) > 0.f)
-			{
-				vFRight   = vNewRight;
-				iRightIdx = i;
-			}
-			else
-			{
-				// Right crossed left → emit left, restart
-				Emit(vFLeft, (iLeftIdx >= 0 && iLeftIdx < n) ? vPortals[iLeftIdx].pArea : pNewArea,
-				     (iLeftIdx >= 0 && iLeftIdx < n) ? &vPortals[iLeftIdx] : nullptr);
-				vApex   = vFLeft;
-				iApexIdx = iLeftIdx;
-				vFLeft  = vApex; vFRight = vApex;
-				iLeftIdx = iRightIdx = iApexIdx;
-				i = (iApexIdx >= 0) ? iApexIdx : 0;
-				continue;
-			}
-		}
+	Vector vSubStart = vStart;
+	int iStartIndex = 0;
 
-		// Update left side of funnel
-		if (TriArea2D(vApex, vFLeft, vNewLeft) >= 0.f)
+	for (int i = 0; i < (int)vPortals.size(); i++)
+	{
+		if (vPortals[i].bForced)
 		{
-			if (vApex == vFLeft || TriArea2D(vApex, vFRight, vNewLeft) < 0.f)
-			{
-				vFLeft   = vNewLeft;
-				iLeftIdx = i;
-			}
-			else
-			{
-				// Left crossed right → emit right, restart
-				Emit(vFRight, (iRightIdx >= 0 && iRightIdx < n) ? vPortals[iRightIdx].pArea : pNewArea,
-				     (iRightIdx >= 0 && iRightIdx < n) ? &vPortals[iRightIdx] : nullptr);
-				vApex   = vFRight;
-				iApexIdx = iRightIdx;
-				vFLeft  = vApex; vFRight = vApex;
-				iLeftIdx = iRightIdx = iApexIdx;
-				i = (iApexIdx >= 0) ? iApexIdx : 0;
-				continue;
-			}
+			RunFunnelSegment(vSubStart, vPortals[i].vLeft, iStartIndex, i, vPortals[i].pArea);
+			Emit(vPortals[i].vLeft, vPortals[i].pArea, &vPortals[i]);
+			vSubStart = vPortals[i].vLeft;
+			iStartIndex = i + 1;
 		}
 	}
 
-	// Final destination
-	Emit(vGoal, vPortals[n - 1].pArea);
+	RunFunnelSegment(vSubStart, vGoal, iStartIndex, (int)vPortals.size(), vPortals.empty() ? nullptr : vPortals.back().pArea);
+	Emit(vGoal, vPortals.empty() ? nullptr : vPortals.back().pArea);
 	return vOut;
 }
 
@@ -2510,44 +2519,7 @@ void CNavEngine::Render()
 			{
 				constexpr float kPortalInset = 24.f;
 				constexpr float fPTol = 2.f;
-				// Per-endpoint wall-corner check:
-				// Only inset if the endpoint is at pArea's own boundary AND no perpendicular
-				// neighbor covers the portal's edge coordinate (= the non-varying axis value).
-				// iPerp: direction perpendicular to the portal at this endpoint.
-				// flEdge: the fixed coordinate of the portal boundary (e.g. minY for North).
-				auto isPortalWallCorner = [&](float endCoord, float pAreaBound, int iPerp, float flEdge) -> bool
-				{
-					if (std::abs(endCoord - pAreaBound) > fPTol) return false; // endpoint from pB, not pArea's corner
-					const bool bPerpX = (iPerp == 0 || iPerp == 2);
-					for (const auto& pc : pArea->m_vConnectionsDir[iPerp])
-					{
-						if (!pc.m_pArea) continue;
-						const CNavArea* pN = pc.m_pArea;
-						const float nMin = bPerpX ? pN->m_vNwCorner.x : pN->m_vNwCorner.y;
-						const float nMax = bPerpX ? pN->m_vSeCorner.x : pN->m_vSeCorner.y;
-						if (flEdge >= nMin - fPTol && flEdge <= nMax + fPTol) return false;
-						
-						// Check diagonal neighbors of pN
-						for (int d = 0; d < 4; d++)
-						{
-							for (const auto& diagConn : pN->m_vConnectionsDir[d])
-							{
-								const CNavArea* pD = diagConn.m_pArea;
-								if (!pD || pD == pArea) continue;
-								const float dMin = bPerpX ? pD->m_vNwCorner.x : pD->m_vNwCorner.y;
-								const float dMax = bPerpX ? pD->m_vSeCorner.x : pD->m_vSeCorner.y;
-								const float dEdgeMin = bPerpX ? pD->m_vNwCorner.y : pD->m_vNwCorner.x;
-								const float dEdgeMax = bPerpX ? pD->m_vSeCorner.y : pD->m_vSeCorner.x;
-								
-								// If the diagonal neighbor touches the edge coordinate and overlaps the endpoint
-								if (flEdge >= dMin - fPTol && flEdge <= dMax + fPTol &&
-									endCoord >= dEdgeMin - fPTol && endCoord <= dEdgeMax + fPTol)
-									return false;
-							}
-						}
-					}
-					return true;
-				};
+				
 				// Perpendicular dirs and pArea bounds per portal direction:
 				//   iDir=0 (N, edge=minY, axisX): oMin→dir3(W),pAreaBound=minX  oMax→dir1(E),pAreaBound=maxX
 				//   iDir=1 (E, edge=maxX, axisY): oMin→dir0(N),pAreaBound=minY  oMax→dir2(S),pAreaBound=maxY
@@ -2572,14 +2544,24 @@ void CNavEngine::Render()
 						else        { oMin = std::max(minY, pB->m_vNwCorner.y); oMax = std::min(maxY, pB->m_vSeCorner.y); }
 						if (oMax <= oMin) continue;
 
-						const bool bInsetMin = isPortalWallCorner(oMin, pAreaMin, kPerpMin[iDir], flEdge);
-						const bool bInsetMax = isPortalWallCorner(oMax, pAreaMax, kPerpMax[iDir], flEdge);
+						const float pToMin = bAxisX ? pB->m_vNwCorner.x : pB->m_vNwCorner.y;
+						const float pToMax = bAxisX ? pB->m_vSeCorner.x : pB->m_vSeCorner.y;
+						const int iOppositeDir = (iDir + 2) % 4;
+
+						const bool bInsetMinFrom = IsWallCornerAtEndpoint(pArea, oMin, pAreaMin, kPerpMin[iDir], flEdge, fPTol);
+						const bool bInsetMaxFrom = IsWallCornerAtEndpoint(pArea, oMax, pAreaMax, kPerpMax[iDir], flEdge, fPTol);
+						
+						const bool bInsetMinTo = IsWallCornerAtEndpoint(const_cast<CNavArea*>(pB), oMin, pToMin, kPerpMax[iOppositeDir], flEdge, fPTol);
+						const bool bInsetMaxTo = IsWallCornerAtEndpoint(const_cast<CNavArea*>(pB), oMax, pToMax, kPerpMin[iOppositeDir], flEdge, fPTol);
+
+						const bool bInsetMin = bInsetMinFrom || bInsetMinTo;
+						const bool bInsetMax = bInsetMaxFrom || bInsetMaxTo;
 						
 						bool bForced = false;
 						float fA = oMin;
 						float fB2 = oMax;
 						
-						if (oMax - oMin <= kPortalInset)
+						if (oMax - oMin <= 48.f)
 						{
 							bForced = true;
 							fA = (oMin + oMax) * 0.5f;

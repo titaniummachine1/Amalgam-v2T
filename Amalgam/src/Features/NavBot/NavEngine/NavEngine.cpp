@@ -965,78 +965,55 @@ bool CNavEngine::NavTo(const Vector& vDestination, PriorityListEnum::PriorityLis
 	}
 	else
 	{
-			// Emit subdivided crumbs along A→B without any hull traces.
-		constexpr float kSubdivideSpacing = 160.f;
-		auto EmitSubdivided = [&](const Vector& vA, const Vector& vB, CNavArea* pArea)
-		{
-			const float flDist2D = Vector(vB.x - vA.x, vB.y - vA.y, 0.f).Length();
-			if (flDist2D > kSubdivideSpacing)
-			{
-				const int nSteps = static_cast<int>(flDist2D / kSubdivideSpacing);
-				const Vector vDelta = vB - vA;
-				for (int s = 1; s < nSteps; s++)
-				{
-					const float t = static_cast<float>(s) / static_cast<float>(nSteps);
-					Crumb_t tMid{};
-					tMid.m_vPos     = vA + vDelta * t;
-					tMid.m_pNavArea = pArea;
-					if (pArea) tMid.m_vPos.z = pArea->GetZ(tMid.m_vPos.x, tMid.m_vPos.y);
-					if (m_vCrumbs.empty() || m_vCrumbs.back().m_vPos.DistToSqr(tMid.m_vPos) >= 1.f)
-						m_vCrumbs.push_back(tMid);
-				}
-			}
-			Crumb_t tB{};
-			tB.m_vPos     = vB;
-			tB.m_pNavArea = pArea;
-			if (m_vCrumbs.empty() || m_vCrumbs.back().m_vPos.DistToSqr(tB.m_vPos) >= 1.f)
-				m_vCrumbs.push_back(tB);
-		};
+		Vector vSSFAStart = reinterpret_cast<CNavArea*>(vPath.front())->m_vCenter;
+		if (pLocalPlayer && pLocalPlayer->IsAlive())
+			vSSFAStart = pLocalPlayer->GetAbsOrigin();
 
-		Vector    vPrev     = reinterpret_cast<CNavArea*>(vPath.front())->m_vCenter;
+		std::vector<NavPortal_t> vPortals;
+		vPortals.reserve(vPath.size());
+
 		CNavArea* pPrevArea = reinterpret_cast<CNavArea*>(vPath.front());
-		if (auto pLP = H::Entities.GetLocal(); pLP && pLP->IsAlive())
-			vPrev = pLP->GetAbsOrigin();
-
 		for (size_t i = 1; i < vPath.size(); i++)
 		{
 			auto pNextArea = reinterpret_cast<CNavArea*>(vPath[i]);
 			if (!pNextArea) continue;
 
-			// Check for drop on directly-connected pairs
 			const bool     bIsOneWay = m_pMap->IsOneWay(pPrevArea, pNextArea);
 			NavPoints_t    tPoints   = m_pMap->DeterminePoints(pPrevArea, pNextArea, bIsOneWay);
 			DropdownHint_t tDrop     = m_pMap->HandleDropdown(tPoints.m_vCenter, tPoints.m_vNext, bIsOneWay);
+
 			if (tDrop.m_bRequiresDrop)
 			{
-				EmitSubdivided(vPrev, tDrop.m_vAdjustedPos, pPrevArea);
-				Crumb_t tDrp{};
-				tDrp.m_vPos               = tDrop.m_vAdjustedPos;
-				tDrp.m_pNavArea           = pPrevArea;
-				tDrp.m_bRequiresDrop      = true;
-				tDrp.m_flDropHeight       = tDrop.m_flDropHeight;
-				tDrp.m_flApproachDistance = tDrop.m_flApproachDistance;
-				tDrp.m_vApproachDir       = tDrop.m_vApproachDir;
-				if (m_vCrumbs.empty() || m_vCrumbs.back().m_vPos.DistToSqr(tDrp.m_vPos) >= 1.f)
-					m_vCrumbs.push_back(tDrp);
-				vPrev     = tDrop.m_vAdjustedPos;
-				pPrevArea = pNextArea;
-				continue;
+				NavPortal_t tPort{};
+				tPort.pArea          = pNextArea;
+				tPort.vLeft          = tDrop.m_vAdjustedPos;
+				tPort.vRight         = tDrop.m_vAdjustedPos;
+				tPort.bForced        = true;
+				tPort.bDrop          = true;
+				tPort.flDropHeight   = tDrop.m_flDropHeight;
+				tPort.flApproachDist = tDrop.m_flApproachDistance;
+				tPort.vApproachDir   = tDrop.m_vApproachDir;
+				vPortals.push_back(tPort);
+			}
+			else
+			{
+				NavPortal_t tPort{};
+				if (ComputePortal(pPrevArea, pNextArea, tPort))
+					vPortals.push_back(tPort);
 			}
 
-			Vector vNext = pNextArea->m_vCenter;
-			vNext.z = pNextArea->GetZ(vNext.x, vNext.y);
-			EmitSubdivided(vPrev, vNext, pNextArea);
-			vPrev     = vNext;
 			pPrevArea = pNextArea;
 		}
 
-		// Final destination
-		Crumb_t tGoal{};
-		tGoal.m_vPos     = vDestination;
-		tGoal.m_pNavArea = pDestArea;
-		tGoal.m_vPos.z   = pDestArea->GetZ(vDestination.x, vDestination.y);
-		if (m_vCrumbs.empty() || m_vCrumbs.back().m_vPos.DistToSqr(tGoal.m_vPos) >= 1.f)
-			m_vCrumbs.push_back(tGoal);
+		const Vector vGoal = [&]() -> Vector
+		{
+			Vector v = vDestination;
+			v.z = pDestArea->GetZ(v.x, v.y);
+			return v;
+		}();
+
+		auto vResult = RunSSFA(vSSFAStart, vGoal, vPortals);
+		m_vCrumbs = std::move(vResult);
 	}
 
 	if (!m_vCrumbs.empty())

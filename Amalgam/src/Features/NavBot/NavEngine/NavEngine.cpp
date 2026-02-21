@@ -473,39 +473,6 @@ static bool NavMarchSegment(CTFPlayer*, CMap*, const Vector&, const Vector&, CNa
 
 // ── Portal / SSFA helpers ────────────────────────────────────────────────────
 
-static bool IsWallCornerAtEndpoint(CNavArea* pArea, float endCoord, float areaBound, int iPerp, float flEdge, float fTol)
-{
-	if (std::abs(endCoord - areaBound) > fTol) return false;
-	const bool bPerpX = (iPerp == 0 || iPerp == 2);
-	for (const auto& pc : pArea->m_vConnectionsDir[iPerp])
-	{
-		if (!pc.m_pArea) continue;
-		const CNavArea* pN = pc.m_pArea;
-		const float nMin = bPerpX ? pN->m_vNwCorner.x : pN->m_vNwCorner.y;
-		const float nMax = bPerpX ? pN->m_vSeCorner.x : pN->m_vSeCorner.y;
-		if (flEdge >= nMin - fTol && flEdge <= nMax + fTol) return false;
-		
-		// Check diagonal neighbors of pN
-		for (int d = 0; d < 4; d++)
-		{
-			for (const auto& diagConn : pN->m_vConnectionsDir[d])
-			{
-				const CNavArea* pD = diagConn.m_pArea;
-				if (!pD || pD == pArea) continue;
-				const float dMin = bPerpX ? pD->m_vNwCorner.x : pD->m_vNwCorner.y;
-				const float dMax = bPerpX ? pD->m_vSeCorner.x : pD->m_vSeCorner.y;
-				const float dEdgeMin = bPerpX ? pD->m_vNwCorner.y : pD->m_vNwCorner.x;
-				const float dEdgeMax = bPerpX ? pD->m_vSeCorner.y : pD->m_vSeCorner.x;
-				
-				if (flEdge >= dMin - fTol && flEdge <= dMax + fTol &&
-					endCoord >= dEdgeMin - fTol && endCoord <= dEdgeMax + fTol)
-					return false;
-			}
-		}
-	}
-	return true;
-}
-
 struct NavPortal_t
 {
 	Vector    vLeft{};
@@ -556,37 +523,19 @@ static bool ComputePortal(CNavArea* pFrom, CNavArea* pTo, NavPortal_t& tOut)
 
 		const float flEdge = (iDir == 0) ? minYA : (iDir == 1) ? maxXA : (iDir == 2) ? maxYA : minXA;
 
-		const float pFromMin = bAxisX ? minXA : minYA;
-		const float pFromMax = bAxisX ? maxXA : maxYA;
-		const float pToMin   = bAxisX ? minXB : minYB;
-		const float pToMax   = bAxisX ? maxXB : maxYB;
-
-		// The opposite direction for pTo to check its walls
-		const int iOppositeDir = (iDir + 2) % 4;
-
-		// STEP 1: Boundary clamping
-		float overlapLeft = oMin;
-		float overlapRight = oMax;
-
-		float commonMin = std::max(pFromMin, pToMin);
-		float commonMax = std::min(pFromMax, pToMax);
-
-		overlapLeft = std::clamp(overlapLeft, commonMin, commonMax);
-		overlapRight = std::clamp(overlapRight, commonMin, commonMax);
-
 		tOut.pArea = pTo;
-
 		tOut.bForced = false;
+
 		Vector vP1, vP2;
 		if (bAxisX)
 		{
-			vP1 = { overlapLeft, flEdge, pFrom->GetZ(overlapLeft, flEdge) };
-			vP2 = { overlapRight, flEdge, pFrom->GetZ(overlapRight, flEdge) };
+			vP1 = { oMin, flEdge, pFrom->GetZ(oMin, flEdge) };
+			vP2 = { oMax, flEdge, pFrom->GetZ(oMax, flEdge) };
 		}
 		else
 		{
-			vP1 = { flEdge, overlapLeft, pFrom->GetZ(flEdge, overlapLeft) };
-			vP2 = { flEdge, overlapRight, pFrom->GetZ(flEdge, overlapRight) };
+			vP1 = { flEdge, oMin, pFrom->GetZ(flEdge, oMin) };
+			vP2 = { flEdge, oMax, pFrom->GetZ(flEdge, oMax) };
 		}
 		const Vector vTravel = pTo->m_vCenter - pFrom->m_vCenter;
 		const float fD1 = vP1.x * (-vTravel.y) + vP1.y * vTravel.x;
@@ -2522,36 +2471,16 @@ void CNavEngine::Render()
 						else        { oMin = std::max(minY, pB->m_vNwCorner.y); oMax = std::min(maxY, pB->m_vSeCorner.y); }
 						if (oMax <= oMin) continue;
 
-						const float pToMin = bAxisX ? pB->m_vNwCorner.x : pB->m_vNwCorner.y;
-						const float pToMax = bAxisX ? pB->m_vSeCorner.x : pB->m_vSeCorner.y;
-						const int iOppositeDir = (iDir + 2) % 4;
-
-						const bool bInsetMinFrom = IsWallCornerAtEndpoint(pArea, oMin, pAreaMin, kPerpMin[iDir], flEdge, fPTol);
-						const bool bInsetMaxFrom = IsWallCornerAtEndpoint(pArea, oMax, pAreaMax, kPerpMax[iDir], flEdge, fPTol);
-						
-						const bool bInsetMinTo = IsWallCornerAtEndpoint(const_cast<CNavArea*>(pB), oMin, pToMin, kPerpMax[iOppositeDir], flEdge, fPTol);
-						const bool bInsetMaxTo = IsWallCornerAtEndpoint(const_cast<CNavArea*>(pB), oMax, pToMax, kPerpMin[iOppositeDir], flEdge, fPTol);
-
-						// STEP 1: Boundary clamping
-						float overlapLeft = oMin;
-						float overlapRight = oMax;
-
-						float commonMin = std::max(pAreaMin, pToMin);
-						float commonMax = std::min(pAreaMax, pToMax);
-
-						overlapLeft = std::clamp(overlapLeft, commonMin, commonMax);
-						overlapRight = std::clamp(overlapRight, commonMin, commonMax);
-
 						Vector vP1, vP2;
 						if (bAxisX)
 						{
-							vP1 = { overlapLeft, flEdge, pArea->GetZ(overlapLeft, flEdge) };
-							vP2 = { overlapRight, flEdge, pArea->GetZ(overlapRight, flEdge) };
+							vP1 = { oMin, flEdge, pArea->GetZ(oMin, flEdge) };
+							vP2 = { oMax, flEdge, pArea->GetZ(oMax, flEdge) };
 						}
 						else
 						{
-							vP1 = { flEdge, overlapLeft, pArea->GetZ(flEdge, overlapLeft) };
-							vP2 = { flEdge, overlapRight, pArea->GetZ(flEdge, overlapRight) };
+							vP1 = { flEdge, oMin, pArea->GetZ(flEdge, oMin) };
+							vP2 = { flEdge, oMax, pArea->GetZ(flEdge, oMax) };
 						}
 						
 						const Vector vTravel = pB->m_vCenter - pArea->m_vCenter;

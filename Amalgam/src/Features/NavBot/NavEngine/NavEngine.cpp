@@ -1160,15 +1160,11 @@ bool CNavEngine::NavTo(const Vector& vDestination, PriorityListEnum::PriorityLis
 				NavPortal_t tPort{};
 				if (ComputePortal(pPrevArea, pNextArea, tPort))
 				{
-					// Only force center waypoint if entering and exiting the SAME area
-					// on the SAME boundary direction (U-turn: e.g., enter North, exit North).
-					// This prevents SSFA from string-pulling diagonally across the area.
+					// Only force center waypoint for TRUE U-turns: entering an area from portal A
+					// and immediately exiting back through portal A (going back where we came from).
 					if (!vPortals.empty() &&
 						!vPortals.back().bDrop &&
-						vPortals.back().pArea == pPrevArea &&
-						vPortals.back().iDir >= 0 &&
-						tPort.iDir >= 0 &&
-						vPortals.back().iDir == tPort.iDir)
+						vPortals.back().pFromArea == tPort.pArea)
 					{
 						NavPortal_t tCenter{};
 						tCenter.pArea     = pPrevArea;

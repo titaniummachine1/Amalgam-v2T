@@ -174,7 +174,7 @@ bool CDuckJump::SimulateUnduckGroundSnap(CTFPlayer* pLocal)
 
 void CDuckJump::Run(CTFPlayer* pLocal, CUserCmd* pCmd)
 {
-	if (!pLocal || !pLocal->IsAlive() || !Vars::Misc::Movement::DuckJump.Value)
+	if (!pLocal || !pLocal->IsAlive() || !Vars::Misc::Movement::DuckJump.Value || !(pCmd->buttons & IN_JUMP))
 	{
 		Reset();
 		return;

@@ -798,6 +798,7 @@ I dont think this is a good idea to disable simulations completely:
 			CVar(DuckSpeed, "Duck speed", false);
 			CVar(MovementLock, "Movement lock", false);
 			CVar(BreakJump, "Break jump", false);
+			CVar(SmartJump, "Smart jump", false);
 			CVar(ShieldTurnRate, "Shield turn rate", false);
 
 			SUBNAMESPACE_BEGIN(NavEngine)
@@ -848,8 +849,6 @@ I dont think this is a good idea to disable simulations completely:
 				CVar(BlacklistDelay, "Blacklist normal scan delay", 0.5f, SLIDER_MIN, 0.1f, 1.f, 0.1f, "%gs");
 				CVar(BlacklistDormantDelay, "Blacklist dormant scan delay", 1.f, SLIDER_MIN, 0.5f, 5.f, 0.5f, "%gs");
 				CVar(BlacklistSlightDangerLimit, "Blacklist slight danger limit", 2, SLIDER_MIN, 1, 10);
-
-				CVar(SmartJump, "Smart jump", false);
 
 				CVarEnum(RechargeDT, "Recharge DT", 0, NONE, nullptr,
 					VA_LIST("Off", "On", "If not fakelagging"),

@@ -655,27 +655,22 @@ static bool ComputePortal(CNavArea* pFrom, CNavArea* pTo, NavPortal_t& tOut)
 		Vector vP1, vP2;
 		bool bP1IsWall = false, bP2IsWall = false;
 
-		// Opposite direction for pTo's boundary-facing edge
-		static constexpr int kOpp[4] = { 2, 3, 0, 1 };
-		const int iOpp = kOpp[iDir];
-
 		if (bAxisX)
 		{
 			// axisX boundary: P1=minX(West side), P2=maxX(East side)
-			// pFrom: its boundary-edge corners (iDir + perp)
-			// pTo:   its boundary-facing corners (iOpp + same perp)
+			// Only check pFrom's own corners on the shared boundary edge
 			vP1 = { trimMin, flEdge, pFrom->GetZ(trimMin, flEdge) };
 			vP2 = { trimMax, flEdge, pFrom->GetZ(trimMax, flEdge) };
-			bP1IsWall = IsWallCorner(pFrom, vP1, iDir, 3) || IsWallCorner(pTo, vP1, iOpp, 3);
-			bP2IsWall = IsWallCorner(pFrom, vP2, iDir, 1) || IsWallCorner(pTo, vP2, iOpp, 1);
+			bP1IsWall = IsWallCorner(pFrom, vP1, iDir, 3);
+			bP2IsWall = IsWallCorner(pFrom, vP2, iDir, 1);
 		}
 		else
 		{
 			// axisY boundary: P1=minY(North side), P2=maxY(South side)
 			vP1 = { flEdge, trimMin, pFrom->GetZ(flEdge, trimMin) };
 			vP2 = { flEdge, trimMax, pFrom->GetZ(flEdge, trimMax) };
-			bP1IsWall = IsWallCorner(pFrom, vP1, iDir, 0) || IsWallCorner(pTo, vP1, iOpp, 0);
-			bP2IsWall = IsWallCorner(pFrom, vP2, iDir, 2) || IsWallCorner(pTo, vP2, iOpp, 2);
+			bP1IsWall = IsWallCorner(pFrom, vP1, iDir, 0);
+			bP2IsWall = IsWallCorner(pFrom, vP2, iDir, 2);
 		}
 
 		const Vector vTravel = pTo->m_vCenter - pFrom->m_vCenter;
@@ -1165,14 +1160,15 @@ bool CNavEngine::NavTo(const Vector& vDestination, PriorityListEnum::PriorityLis
 				NavPortal_t tPort{};
 				if (ComputePortal(pPrevArea, pNextArea, tPort))
 				{
-					// Consecutive portals through the same intermediate area on the same
-					// boundary direction need a forced center waypoint so SSFA doesn't
-					// shortcut diagonally across the area (e.g. enter North, exit North).
+					// Only force center waypoint if entering and exiting the SAME area
+					// on the SAME boundary direction (U-turn: e.g., enter North, exit North).
+					// This prevents SSFA from string-pulling diagonally across the area.
 					if (!vPortals.empty() &&
 						!vPortals.back().bDrop &&
-						vPortals.back().pArea == tPort.pFromArea &&
-						vPortals.back().iDir == tPort.iDir &&
-						tPort.iDir >= 0)
+						vPortals.back().pArea == pPrevArea &&
+						vPortals.back().iDir >= 0 &&
+						tPort.iDir >= 0 &&
+						vPortals.back().iDir == tPort.iDir)
 					{
 						NavPortal_t tCenter{};
 						tCenter.pArea     = pPrevArea;
@@ -2666,28 +2662,26 @@ void CNavEngine::Render()
 						const float trimMin = oMin + tMin * (oMax - oMin);
 						const float trimMax = oMin + tMax * (oMax - oMin);
 
-						static constexpr int kOppD[4] = { 2, 3, 0, 1 };
-						const int iOppD = kOppD[iDir];
 						Vector vP1, vP2;
 						bool bP1IsWall, bP2IsWall;
 						if (bAxisX)
 						{
 							vP1 = { trimMin, flEdge, pArea->GetZ(trimMin, flEdge) };
 							vP2 = { trimMax, flEdge, pArea->GetZ(trimMax, flEdge) };
-							bP1IsWall = IsWallCorner(pArea, vP1, iDir, 3) || IsWallCorner(pB, vP1, iOppD, 3);
-							bP2IsWall = IsWallCorner(pArea, vP2, iDir, 1) || IsWallCorner(pB, vP2, iOppD, 1);
+							bP1IsWall = IsWallCorner(pArea, vP1, iDir, 3);
+							bP2IsWall = IsWallCorner(pArea, vP2, iDir, 1);
 						}
 						else
 						{
 							vP1 = { flEdge, trimMin, pArea->GetZ(flEdge, trimMin) };
 							vP2 = { flEdge, trimMax, pArea->GetZ(flEdge, trimMax) };
-							bP1IsWall = IsWallCorner(pArea, vP1, iDir, 0) || IsWallCorner(pB, vP1, iOppD, 0);
-							bP2IsWall = IsWallCorner(pArea, vP2, iDir, 2) || IsWallCorner(pB, vP2, iOppD, 2);
+							bP1IsWall = IsWallCorner(pArea, vP1, iDir, 0);
+							bP2IsWall = IsWallCorner(pArea, vP2, iDir, 2);
 						}
 
 						const Vector vTravel = pB->m_vCenter - pArea->m_vCenter;
-						const float fD1 = vP1.x * (-vTravel.y) + vP1.y * vTravel.x;
-						const float fD2 = vP2.x * (-vTravel.y) + vP2.y * vTravel.x;
+						float fD1 = vP1.x * (-vTravel.y) + vP1.y * vTravel.x;
+						float fD2 = vP2.x * (-vTravel.y) + vP2.y * vTravel.x;
 
 						Vector vLeft, vRight;
 						bool bLeftIsWall, bRightIsWall;

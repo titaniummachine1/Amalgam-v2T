@@ -1,6 +1,7 @@
 #pragma once
 #include "../../SDK/SDK.h"
 #include "../../Utils/Timer/Timer.h"
+#include "../Misc/DuckJump/DuckJump.h"
 
 struct ClosestEnemy_t
 {
@@ -11,15 +12,6 @@ struct ClosestEnemy_t
 
 Enum(ShouldTarget, Invalid = -1, DontTarget, Target);
 
-enum EJumpState
-{
-	STATE_AWAITING_JUMP,
-	STATE_CTAP,
-	STATE_JUMP,
-	STATE_ASCENDING,
-	STATE_DESCENDING
-};
-
 class CBotUtils
 {
 private:
@@ -29,8 +21,6 @@ private:
 
 	bool HasMedigunTargets(CTFPlayer* pLocal, CTFWeaponBase* pWeapon);
 	void UpdateBestSlot(CTFPlayer* pLocal);
-
-	EJumpState m_eJumpState = STATE_AWAITING_JUMP;
 
 	struct LegitLook_t
 	{
@@ -75,10 +65,6 @@ public:
 	ClosestEnemy_t m_tClosestEnemy = {};
 	Vec3 m_vLastAngles = {};
 
-	float m_flLastObstacleHeight = 0.f;
-	int m_iStateStartTime = 0;
-	EJumpState m_eLastState = STATE_AWAITING_JUMP;
-
 	bool ShouldAssist(CTFPlayer* pLocal, int iEntIdx);
 	ShouldTargetEnum::ShouldTargetEnum ShouldTarget(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, int iEntIdx);
 	ShouldTargetEnum::ShouldTargetEnum ShouldTargetBuilding(CTFPlayer* pLocal, int iEntIdx);
@@ -93,10 +79,8 @@ public:
 	void LookLegit(CTFPlayer* pLocal, CUserCmd* pCmd, const Vec3& vDest, bool bSilent);
 	void InvalidateLLAP();
 
-	bool IsSurfaceWalkable(const Vector& vNormal);
-	bool SmartJump(CTFPlayer* pLocal, CUserCmd* pCmd);
 	void HandleSmartJump(CTFPlayer* pLocal, CUserCmd* pCmd);
-	void ForceJump() { if (m_eJumpState == STATE_AWAITING_JUMP) m_eJumpState = Vars::Misc::Movement::AutoCTap.Value ? STATE_CTAP : STATE_JUMP; }
+	void ForceJump() { F::DuckJump.ForceJump(); }
 
 	void AutoScope(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd);
 	void Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd);

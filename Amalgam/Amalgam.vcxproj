@@ -1158,6 +1158,7 @@
     <ClCompile Include="src\Features\ImGui\Menu\Menu.cpp" />
     <ClCompile Include="src\Features\Misc\AutoVote\AutoVote.cpp" />
     <ClCompile Include="src\Features\Misc\Misc.cpp" />
+    <ClCompile Include="src\Features\Misc\DuckJump\DuckJump.cpp" />
     <ClCompile Include="src\Features\NetworkFix\NetworkFix.cpp" />
     <ClCompile Include="src\Features\NoSpread\NoSpread.cpp" />
     <ClCompile Include="src\Features\NoSpread\NoSpreadHitscan\NoSpreadHitscan.cpp" />

@@ -6,6 +6,7 @@
 #include "../Players/PlayerUtils.h"
 #include "../Players/SteamProfileCache.h"
 #include "../Aimbot/AutoRocketJump/AutoRocketJump.h"
+#include "DuckJump/DuckJump.h"
 #ifdef TEXTMODE
 #include "NamedPipe/NamedPipe.h"
 #endif
@@ -38,6 +39,8 @@ void CMisc::RunPre(CTFPlayer* pLocal, CUserCmd* pCmd)
 		return;
 
 	AutoJump(pLocal, pCmd);
+	if (Vars::Misc::Movement::DuckJump.Value)
+		F::DuckJump.Run(pLocal, pCmd);
 	EdgeJump(pLocal, pCmd);
 	if (pLocal->InCond(TF_COND_HALLOWEEN_KART))
 		return;

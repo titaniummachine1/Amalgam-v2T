@@ -791,6 +791,8 @@ I dont think this is a good idea to disable simulations completely:
 			CVar(NoPush, "No push", false);
 			CVar(AutoRocketJump, "Auto rocket jump", false);
 			CVar(AutoCTap, "Auto ctap", false);
+			CVar(DuckJump, "Duck jump", false);
+			CVar(LedgeGrab, "Ledge grab", false);
 			CVar(FastStop, "Fast stop", false);
 			CVar(FastAccelerate, "Fast accelerate", false);
 			CVar(DuckSpeed, "Duck speed", false);

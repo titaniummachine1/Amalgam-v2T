@@ -8,9 +8,7 @@
 #include "../Features/Visuals/Materials/Materials.h"
 #include "../Features/Visuals/Visuals.h"
 #include "../SDK/Events/Events.h"
-#ifdef TEXTMODE
 #include "../Features/Misc/NamedPipe/NamedPipe.h"
-#endif
 #include "../Utils/Hash/FNV1A.h"
 
 #include <Psapi.h>
@@ -126,9 +124,7 @@ void CCore::Load()
 		return;
 	}
 
-#ifdef TEXTMODE
 	F::NamedPipe.Initialize();
-#endif
 
 	float flTime = 0.f;
 	while (!ModulesLoaded())

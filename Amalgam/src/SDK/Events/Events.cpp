@@ -12,9 +12,7 @@
 #include "../../Features/Visuals/Visuals.h"
 #include "../../Features/Killstreak/Killstreak.h"
 #include "../../Features/NavBot/NavEngine/NavEngine.h"
-#ifdef TEXTMODE
 #include "../../Features/Misc/NamedPipe/NamedPipe.h"
-#endif
 
 
 bool CEventListener::Initialize()
@@ -57,10 +55,9 @@ void CEventListener::FireGameEvent(IGameEvent* pEvent)
 	F::CritHack.Event(pEvent, uHash, pLocal);
 	F::AutoHeal.Event(pEvent, uHash);
 	F::Misc.Event(pEvent, uHash);
+	F::NamedPipe.Event(pEvent, uHash);
 #ifndef TEXTMODE
 	F::Visuals.Event(pEvent, uHash);
-#else
-	F::NamedPipe.Event(pEvent, uHash);
 #endif
 	switch (uHash)
 	{

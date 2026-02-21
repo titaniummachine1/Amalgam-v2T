@@ -564,19 +564,22 @@ static bool IsWallCorner(const CNavArea* pArea, const Vector& vCorner, int iDir1
 	return true;                                 // < 1.98 → wall corner
 }
 
+// Returns true if the height step from pFrom to pTo at a given (x,y) is passable.
+// Drops are always valid. Only block if neighbor is more than 72u above (impossible jump).
+static bool IsHeightPassable(CNavArea* pFrom, CNavArea* pTo, float x, float y)
+{
+	constexpr float kMaxJump = 72.f;
+	const float zFrom = pFrom->GetZ(x, y);
+	const float zTo   = pTo->GetZ(x, y);
+	return (zTo - zFrom) <= kMaxJump;
+}
+
 static bool ComputePortal(CNavArea* pFrom, CNavArea* pTo, NavPortal_t& tOut)
 {
-	constexpr float kInset = 24.f;
-	constexpr float fTol   = 2.f;
-
 	const float minXA = pFrom->m_vNwCorner.x, maxXA = pFrom->m_vSeCorner.x;
 	const float minYA = pFrom->m_vNwCorner.y, maxYA = pFrom->m_vSeCorner.y;
 	const float minXB = pTo->m_vNwCorner.x,   maxXB = pTo->m_vSeCorner.x;
 	const float minYB = pTo->m_vNwCorner.y,   maxYB = pTo->m_vSeCorner.y;
-
-	// iDir -> [iPerpAtMin, iPerpAtMax]
-	static constexpr int kPerpMin[4] = { 3, 0, 3, 0 };
-	static constexpr int kPerpMax[4] = { 1, 2, 1, 2 };
 
 	for (int iDir = 0; iDir < 4; iDir++)
 	{
@@ -593,29 +596,75 @@ static bool ComputePortal(CNavArea* pFrom, CNavArea* pTo, NavPortal_t& tOut)
 
 		const float flEdge = (iDir == 0) ? minYA : (iDir == 1) ? maxXA : (iDir == 2) ? maxYA : minXA;
 
-		tOut.pArea = pTo;
-		tOut.bForced = false;
+		// Helper: sample passability at a parametric position along the boundary
+		auto SamplePassable = [&](float t) -> bool
+		{
+			const float coord = oMin + t * (oMax - oMin);
+			const float x = bAxisX ? coord : flEdge;
+			const float y = bAxisX ? flEdge : coord;
+			return IsHeightPassable(pFrom, pTo, x, y);
+		};
+
+		const bool bP1Ok = SamplePassable(0.f);
+		const bool bP2Ok = SamplePassable(1.f);
+
+		// Both endpoints impassable → skip this connection entirely
+		if (!bP1Ok && !bP2Ok)
+			continue;
+
+		// Binary search to find valid range on each side
+		// If P1 is bad, search from left for the first valid point
+		float tMin = 0.f, tMax = 1.f;
+		constexpr int kBinaryIter = 8;
+
+		if (!bP1Ok)
+		{
+			float lo = 0.f, hi = 1.f;
+			for (int k = 0; k < kBinaryIter; k++)
+			{
+				float mid = (lo + hi) * 0.5f;
+				if (SamplePassable(mid)) hi = mid;
+				else                     lo = mid;
+			}
+			tMin = hi;
+		}
+
+		if (!bP2Ok)
+		{
+			float lo = 0.f, hi = 1.f;
+			for (int k = 0; k < kBinaryIter; k++)
+			{
+				float mid = (lo + hi) * 0.5f;
+				if (SamplePassable(mid)) lo = mid;
+				else                     hi = mid;
+			}
+			tMax = lo;
+		}
+
+		// After trimming, portal must still have meaningful width
+		if (tMax <= tMin)
+			continue;
+
+		const float trimMin = oMin + tMin * (oMax - oMin);
+		const float trimMax = oMin + tMax * (oMax - oMin);
+
+		tOut.pArea    = pTo;
+		tOut.bForced  = false;
 
 		Vector vP1, vP2;
 		bool bP1IsWall = false, bP2IsWall = false;
 
 		if (bAxisX)
 		{
-			vP1 = { oMin, flEdge, pFrom->GetZ(oMin, flEdge) };
-			vP2 = { oMax, flEdge, pFrom->GetZ(oMax, flEdge) };
-
-			// iDir=0 (N, min-Y) or iDir=2 (S, max-Y)
-			// oMin corresponds to min-X (W, 3), oMax corresponds to max-X (E, 1)
+			vP1 = { trimMin, flEdge, pFrom->GetZ(trimMin, flEdge) };
+			vP2 = { trimMax, flEdge, pFrom->GetZ(trimMax, flEdge) };
 			bP1IsWall = IsWallCorner(pFrom, vP1, iDir, 3) || IsWallCorner(pTo, vP1, iDir == 0 ? 2 : 0, 3);
 			bP2IsWall = IsWallCorner(pFrom, vP2, iDir, 1) || IsWallCorner(pTo, vP2, iDir == 0 ? 2 : 0, 1);
 		}
 		else
 		{
-			vP1 = { flEdge, oMin, pFrom->GetZ(flEdge, oMin) };
-			vP2 = { flEdge, oMax, pFrom->GetZ(flEdge, oMax) };
-
-			// iDir=1 (E, max-X) or iDir=3 (W, min-X)
-			// oMin corresponds to min-Y (N, 0), oMax corresponds to max-Y (S, 2)
+			vP1 = { flEdge, trimMin, pFrom->GetZ(flEdge, trimMin) };
+			vP2 = { flEdge, trimMax, pFrom->GetZ(flEdge, trimMax) };
 			bP1IsWall = IsWallCorner(pFrom, vP1, iDir, 0) || IsWallCorner(pTo, vP1, iDir == 1 ? 3 : 1, 0);
 			bP2IsWall = IsWallCorner(pFrom, vP2, iDir, 2) || IsWallCorner(pTo, vP2, iDir == 1 ? 3 : 1, 2);
 		}
@@ -2494,74 +2543,140 @@ void CNavEngine::Render()
 			if (bDrawWallCorners)
 			{
 				constexpr float hs = 12.f;
-				auto DrawCornerTri = [&](const Vector& v, float dx, float dy)
+				// Draw a right triangle at the corner with legs along the area edges.
+				// vCorner is the 90-degree vertex; vEdgeX and vEdgeY are the leg tips.
+				// Rendered double-sided so it's visible from any camera angle.
+				auto DrawCornerTri = [&](const Vector& vCorner, const Vector& vEdgeX, const Vector& vEdgeY)
 				{
-					const Vector vP1{ v.x, v.y, v.z + 1.f };
-					const Vector vP2{ v.x + dx, v.y, v.z + 1.f };
-					const Vector vP3{ v.x, v.y + dy, v.z + 1.f };
-					H::Draw.RenderTriangle(vP1, vP2, vP3, cWallCorner, false);
+					H::Draw.RenderTriangle(vCorner, vEdgeX, vEdgeY, cWallCorner, false);
+					H::Draw.RenderTriangle(vCorner, vEdgeY, vEdgeX, cWallCorner, false);
 				};
 
-				// NW=(0,3) -> dx=-hs, dy=-hs
-				if (IsWallCorner(pArea, vNw, 0, 3)) DrawCornerTri(vNw, -hs, -hs);
-				// NE=(0,1) -> dx=+hs, dy=-hs
-				if (IsWallCorner(pArea, vNe, 0, 1)) DrawCornerTri(vNe, hs, -hs);
-				// SW=(2,3) -> dx=-hs, dy=+hs
-				if (IsWallCorner(pArea, vSw, 2, 3)) DrawCornerTri(vSw, -hs, hs);
-				// SE=(2,1) -> dx=+hs, dy=+hs
-				if (IsWallCorner(pArea, vSe, 2, 1)) DrawCornerTri(vSe, hs, hs);
+				// NW corner: legs go +X (toward NE) and +Y (toward SW)
+				if (IsWallCorner(pArea, vNw, 0, 3))
+				{
+					const Vector vLegX{ vNw.x + hs, vNw.y, pArea->GetZ(vNw.x + hs, vNw.y) };
+					const Vector vLegY{ vNw.x, vNw.y + hs, pArea->GetZ(vNw.x, vNw.y + hs) };
+					DrawCornerTri(vNw, vLegX, vLegY);
+				}
+				// NE corner: legs go -X (toward NW) and +Y (toward SE)
+				if (IsWallCorner(pArea, vNe, 0, 1))
+				{
+					const Vector vLegX{ vNe.x - hs, vNe.y, pArea->GetZ(vNe.x - hs, vNe.y) };
+					const Vector vLegY{ vNe.x, vNe.y + hs, pArea->GetZ(vNe.x, vNe.y + hs) };
+					DrawCornerTri(vNe, vLegX, vLegY);
+				}
+				// SW corner: legs go +X (toward SE) and -Y (toward NW)
+				if (IsWallCorner(pArea, vSw, 2, 3))
+				{
+					const Vector vLegX{ vSw.x + hs, vSw.y, pArea->GetZ(vSw.x + hs, vSw.y) };
+					const Vector vLegY{ vSw.x, vSw.y - hs, pArea->GetZ(vSw.x, vSw.y - hs) };
+					DrawCornerTri(vSw, vLegX, vLegY);
+				}
+				// SE corner: legs go -X (toward SW) and -Y (toward NE)
+				if (IsWallCorner(pArea, vSe, 2, 1))
+				{
+					const Vector vLegX{ vSe.x - hs, vSe.y, pArea->GetZ(vSe.x - hs, vSe.y) };
+					const Vector vLegY{ vSe.x, vSe.y - hs, pArea->GetZ(vSe.x, vSe.y - hs) };
+					DrawCornerTri(vSe, vLegX, vLegY);
+				}
 			}
 			// Draw portals (shared X/Y overlap on A's edge, inset 24u only at wall-corner endpoints)
 			if (bDrawPortals && cPortal.a)
 			{
 				constexpr float kPortalInset = 24.f;
-				constexpr float fPTol = 2.f;
-				
-				// Perpendicular dirs and pArea bounds per portal direction:
-				//   iDir=0 (N, edge=minY, axisX): oMin->dir3(W),pAreaBound=minX  oMax->dir1(E),pAreaBound=maxX
-				//   iDir=1 (E, edge=maxX, axisY): oMin->dir0(N),pAreaBound=minY  oMax->dir2(S),pAreaBound=maxY
-				//   iDir=2 (S, edge=maxY, axisX): oMin->dir3(W),pAreaBound=minX  oMax->dir1(E),pAreaBound=maxX
-				//   iDir=3 (W, edge=minX, axisY): oMin->dir0(N),pAreaBound=minY  oMax->dir2(S),pAreaBound=maxY
-				static constexpr int kPerpMin[4] = { 3, 0, 3, 0 };
-				static constexpr int kPerpMax[4] = { 1, 2, 1, 2 };
+				constexpr int   kBinaryIter  = 8;
 				for (int iDir = 0; iDir < 4; iDir++)
 				{
 					const bool bAxisX = (iDir == 0 || iDir == 2);
-					// Edge coordinate (non-varying axis of this portal boundary)
 					const float flEdge = (iDir == 0) ? minY : (iDir == 1) ? maxX : (iDir == 2) ? maxY : minX;
-					// pArea's own boundary extents on the portal axis
-					const float pAreaMin = bAxisX ? minX : minY;
-					const float pAreaMax = bAxisX ? maxX : maxY;
 					for (const auto& conn : pArea->m_vConnectionsDir[iDir])
 					{
 						if (!conn.m_pArea) continue;
-						const CNavArea* pB = conn.m_pArea;
+						CNavArea* pB = conn.m_pArea;
 						float oMin, oMax;
 						if (bAxisX) { oMin = std::max(minX, pB->m_vNwCorner.x); oMax = std::min(maxX, pB->m_vSeCorner.x); }
 						else        { oMin = std::max(minY, pB->m_vNwCorner.y); oMax = std::min(maxY, pB->m_vSeCorner.y); }
 						if (oMax <= oMin) continue;
 
+						// Height passability sampling (mirrors ComputePortal)
+						auto SampleOk = [&](float t) -> bool
+						{
+							const float coord = oMin + t * (oMax - oMin);
+							const float x = bAxisX ? coord : flEdge;
+							const float y = bAxisX ? flEdge : coord;
+							return IsHeightPassable(pArea, pB, x, y);
+						};
+
+						const bool bP1Ok = SampleOk(0.f);
+						const bool bP2Ok = SampleOk(1.f);
+						if (!bP1Ok && !bP2Ok) continue;
+
+						float tMin = 0.f, tMax = 1.f;
+						if (!bP1Ok)
+						{
+							float lo = 0.f, hi = 1.f;
+							for (int k = 0; k < kBinaryIter; k++)
+							{
+								float mid = (lo + hi) * 0.5f;
+								if (SampleOk(mid)) hi = mid; else lo = mid;
+							}
+							tMin = hi;
+						}
+						if (!bP2Ok)
+						{
+							float lo = 0.f, hi = 1.f;
+							for (int k = 0; k < kBinaryIter; k++)
+							{
+								float mid = (lo + hi) * 0.5f;
+								if (SampleOk(mid)) lo = mid; else hi = mid;
+							}
+							tMax = lo;
+						}
+						if (tMax <= tMin) continue;
+
+						const float trimMin = oMin + tMin * (oMax - oMin);
+						const float trimMax = oMin + tMax * (oMax - oMin);
+
 						Vector vP1, vP2;
+						bool bP1IsWall, bP2IsWall;
 						if (bAxisX)
 						{
-							vP1 = { oMin, flEdge, pArea->GetZ(oMin, flEdge) };
-							vP2 = { oMax, flEdge, pArea->GetZ(oMax, flEdge) };
+							vP1 = { trimMin, flEdge, pArea->GetZ(trimMin, flEdge) };
+							vP2 = { trimMax, flEdge, pArea->GetZ(trimMax, flEdge) };
+							bP1IsWall = IsWallCorner(pArea, vP1, iDir, 3) || IsWallCorner(pB, vP1, iDir == 0 ? 2 : 0, 3);
+							bP2IsWall = IsWallCorner(pArea, vP2, iDir, 1) || IsWallCorner(pB, vP2, iDir == 0 ? 2 : 0, 1);
 						}
 						else
 						{
-							vP1 = { flEdge, oMin, pArea->GetZ(flEdge, oMin) };
-							vP2 = { flEdge, oMax, pArea->GetZ(flEdge, oMax) };
+							vP1 = { flEdge, trimMin, pArea->GetZ(flEdge, trimMin) };
+							vP2 = { flEdge, trimMax, pArea->GetZ(flEdge, trimMax) };
+							bP1IsWall = IsWallCorner(pArea, vP1, iDir, 0) || IsWallCorner(pB, vP1, iDir == 1 ? 3 : 1, 0);
+							bP2IsWall = IsWallCorner(pArea, vP2, iDir, 2) || IsWallCorner(pB, vP2, iDir == 1 ? 3 : 1, 2);
 						}
-						
+
 						const Vector vTravel = pB->m_vCenter - pArea->m_vCenter;
 						const float fD1 = vP1.x * (-vTravel.y) + vP1.y * vTravel.x;
 						const float fD2 = vP2.x * (-vTravel.y) + vP2.y * vTravel.x;
-						
+
 						Vector vLeft, vRight;
-						if (fD1 <= fD2) { vLeft = vP1; vRight = vP2; }
-						else            { vLeft = vP2; vRight = vP1; }
-						
-						H::Draw.RenderLine(vLeft, vRight, cPortal, false);
+						bool bLeftIsWall, bRightIsWall;
+						if (fD1 <= fD2) { vLeft = vP1; vRight = vP2; bLeftIsWall = bP1IsWall; bRightIsWall = bP2IsWall; }
+						else            { vLeft = vP2; vRight = vP1; bLeftIsWall = bP2IsWall; bRightIsWall = bP1IsWall; }
+
+						// Shrink portal endpoints away from wall corners
+						Vector vPortalDir = vRight - vLeft;
+						const float flWidth = vPortalDir.Length2D();
+						if (flWidth > 1.f)
+						{
+							vPortalDir.x /= flWidth; vPortalDir.y /= flWidth; vPortalDir.z = 0.f;
+							const float flInset = std::min(kPortalInset, (flWidth - 1.f) * 0.5f);
+							if (bLeftIsWall)  vLeft  += vPortalDir * flInset;
+							if (bRightIsWall) vRight -= vPortalDir * flInset;
+						}
+
+						if ((vRight - vLeft).Length2D() > 0.5f)
+							H::Draw.RenderLine(vLeft, vRight, cPortal, false);
 					}
 				}
 			}

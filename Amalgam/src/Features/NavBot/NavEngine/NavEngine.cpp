@@ -557,10 +557,10 @@ static bool IsWallCorner(const CNavArea* pArea, const Vector& vCorner, int iDir1
 	const float s2 = dirScore(iDir2, pN2);
 	const float total = s1 + s2;
 
-	if (total >= 1.985f) return false;          // 2.0 or 1.99 → surrounded
-	if (total > 1.975f)                         // ≈1.98 → concave, need diagonal
-		return !hasDiagonalCover(pN1);
-	return true;                                 // < 1.98 → wall corner
+	if (total >= 1.95f) return false;           // ≥1.95 → surrounded (includes edge-aligned 0.99+0.99)
+	if (total > 0.9f)                           // partial coverage → check diagonal
+		return !hasDiagonalCover(s1 > s2 ? pN1 : pN2);
+	return true;                                 // no meaningful coverage → wall corner
 }
 
 // Returns true if the height step from pFrom to pTo at a given (x,y) is passable.
@@ -750,9 +750,7 @@ static std::vector<Crumb_t> RunSSFA(
 		CNavArea* pNewArea      = (i < n) ? vPortals[i].pArea  : vPortals[n - 1].pArea;
 		const NavPortal_t* pNewPortal = (i < n) ? &vPortals[i] : nullptr;
 
-		// Dynamic funnel shrinking: AABB clearance based on approach angle from apex to portal.
-		// An axis-aligned 24-unit box needs clearance = 24 * (|cos θ| + |sin θ|) where θ is
-		// the angle between the approach direction and the portal normal.
+		// Shrink portal endpoints away from wall corners by a flat clearance.
 		// Only shrink sides that are actually adjacent to a wall corner.
 		if (i < n && pNewPortal && !pNewPortal->bForced)
 		{
@@ -770,46 +768,25 @@ static std::vector<Crumb_t> RunSSFA(
 					vPortalDir.y /= flPortalWidth;
 					vPortalDir.z = 0.f;
 
-					// Approach from apex toward portal midpoint
-					const Vector vMid = (vNewLeft + vNewRight) * 0.5f;
-					Vector vApproach  = vMid - vApex;
-					const float flApproachLen = vApproach.Length2D();
+					constexpr float kClearance = 24.f;
+					const int   iWallSides = (bLeftIsWall ? 1 : 0) + (bRightIsWall ? 1 : 0);
+					const float flBudget   = std::max(0.f, flPortalWidth - 1.f);
+					const float flPerSide  = flBudget / iWallSides;
+					const float flActual   = std::min(kClearance, flPerSide);
 
-					if (flApproachLen > 1.f)
+					if (flActual > 0.f)
 					{
-						vApproach.x /= flApproachLen;
-						vApproach.y /= flApproachLen;
-						vApproach.z = 0.f;
-
-						// Portal normal points in the travel direction (perpendicular to portal edge)
-						const Vector vPortalNormal(-vPortalDir.y, vPortalDir.x, 0.f);
-
-						// AABB clearance formula: box half-size * (|cos θ| + |sin θ|)
-						const float flCosTheta = std::abs(vApproach.Dot(vPortalNormal));
-						const float flSinTheta = std::abs(vApproach.Dot(vPortalDir));
-						const float flClearance = 24.f * (flCosTheta + flSinTheta);
-
-						// Each wall side consumes clearance from its own half of the portal.
-						// Leave at least 1 unit total width after both sides are shrunk.
-						const int   iWallSides   = (bLeftIsWall ? 1 : 0) + (bRightIsWall ? 1 : 0);
-						const float flBudget     = std::max(0.f, flPortalWidth - 1.f);
-						const float flPerSide    = flBudget / iWallSides;
-						const float flActual     = std::min(flClearance, flPerSide);
-
-						if (flActual > 0.f)
+						if (bLeftIsWall)
 						{
-							if (bLeftIsWall)
-							{
-								vNewLeft  += vPortalDir * flActual;
-								if (pNewPortal->pFromArea)
-									vNewLeft.z = pNewPortal->pFromArea->GetZ(vNewLeft.x, vNewLeft.y);
-							}
-							if (bRightIsWall)
-							{
-								vNewRight -= vPortalDir * flActual;
-								if (pNewPortal->pFromArea)
-									vNewRight.z = pNewPortal->pFromArea->GetZ(vNewRight.x, vNewRight.y);
-							}
+							vNewLeft  += vPortalDir * flActual;
+							if (pNewPortal->pFromArea)
+								vNewLeft.z = pNewPortal->pFromArea->GetZ(vNewLeft.x, vNewLeft.y);
+						}
+						if (bRightIsWall)
+						{
+							vNewRight -= vPortalDir * flActual;
+							if (pNewPortal->pFromArea)
+								vNewRight.z = pNewPortal->pFromArea->GetZ(vNewRight.x, vNewRight.y);
 						}
 					}
 				}
@@ -1188,13 +1165,12 @@ bool CNavEngine::NavTo(const Vector& vDestination, PriorityListEnum::PriorityLis
 				NavPortal_t tPort{};
 				if (ComputePortal(pPrevArea, pNextArea, tPort))
 				{
-					// Consecutive portals that both cross the same direction boundary of the
-					// same from-area are geometrically impossible without passing through the
-					// area center first (e.g. enter North, exit North again).
-					// Insert a forced center waypoint to prevent SSFA from shortcutting.
+					// Consecutive portals through the same intermediate area on the same
+					// boundary direction need a forced center waypoint so SSFA doesn't
+					// shortcut diagonally across the area (e.g. enter North, exit North).
 					if (!vPortals.empty() &&
 						!vPortals.back().bDrop &&
-						vPortals.back().pFromArea == pPrevArea &&
+						vPortals.back().pArea == tPort.pFromArea &&
 						vPortals.back().iDir == tPort.iDir &&
 						tPort.iDir >= 0)
 					{

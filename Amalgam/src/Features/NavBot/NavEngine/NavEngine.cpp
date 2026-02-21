@@ -2526,10 +2526,10 @@ void CNavEngine::Render()
 				constexpr float fPTol = 2.f;
 				
 				// Perpendicular dirs and pArea bounds per portal direction:
-				//   iDir=0 (N, edge=minY, axisX): oMin→dir3(W),pAreaBound=minX  oMax→dir1(E),pAreaBound=maxX
-				//   iDir=1 (E, edge=maxX, axisY): oMin→dir0(N),pAreaBound=minY  oMax→dir2(S),pAreaBound=maxY
-				//   iDir=2 (S, edge=maxY, axisX): oMin→dir3(W),pAreaBound=minX  oMax→dir1(E),pAreaBound=maxX
-				//   iDir=3 (W, edge=minX, axisY): oMin→dir0(N),pAreaBound=minY  oMax→dir2(S),pAreaBound=maxY
+				//   iDir=0 (N, edge=minY, axisX): oMin->dir3(W),pAreaBound=minX  oMax->dir1(E),pAreaBound=maxX
+				//   iDir=1 (E, edge=maxX, axisY): oMin->dir0(N),pAreaBound=minY  oMax->dir2(S),pAreaBound=maxY
+				//   iDir=2 (S, edge=maxY, axisX): oMin->dir3(W),pAreaBound=minX  oMax->dir1(E),pAreaBound=maxX
+				//   iDir=3 (W, edge=minX, axisY): oMin->dir0(N),pAreaBound=minY  oMax->dir2(S),pAreaBound=maxY
 				static constexpr int kPerpMin[4] = { 3, 0, 3, 0 };
 				static constexpr int kPerpMax[4] = { 1, 2, 1, 2 };
 				for (int iDir = 0; iDir < 4; iDir++)
@@ -2562,37 +2562,60 @@ void CNavEngine::Render()
 						const bool bInsetMin = bInsetMinFrom || bInsetMinTo;
 						const bool bInsetMax = bInsetMaxFrom || bInsetMaxTo;
 
-                    Vector vP1, vP2;
-                    if (bAxisX)
-                    {
-                        vP1 = { fA, flEdge, pArea->GetZ(fA, flEdge) };
-                        vP2 = { fB2, flEdge, pArea->GetZ(fB2, flEdge) };
-                    }
-                    else
-                    {
-                        vP1 = { flEdge, fA, pArea->GetZ(flEdge, fA) };
-                        vP2 = { flEdge, fB2, pArea->GetZ(flEdge, fB2) };
-                    }
-                    
-                    if (bForced)
-                    {
-                        H::Draw.RenderLine(vP1, vP1 + Vector(0,0,16), cPortal, false);
-                        continue;
-                    }
-                    
-                    const Vector vTravel = pB->m_vCenter - pArea->m_vCenter;
-                    const float fD1 = vP1.x * (-vTravel.y) + vP1.y * vTravel.x;
-                    const float fD2 = vP2.x * (-vTravel.y) + vP2.y * vTravel.x;
-                    
-                    Vector vLeft, vRight;
-                    if (fD1 <= fD2) { vLeft = vP1; vRight = vP2; }
-                    else            { vLeft = vP2; vRight = vP1; }
-                    
-                    H::Draw.RenderLine(vLeft, vRight, cPortal, false);
-                }
-            }
-        }
-    }
+						bool bForced = false;
+						float fA = oMin;
+						float fB2 = oMax;
+						
+						if (oMax - oMin <= 10.f)
+						{
+							bForced = true;
+							fA = (oMin + oMax) * 0.5f;
+							fB2 = fA;
+						}
+						else
+						{
+							if (bInsetMin) fA += kPortalInset;
+							if (bInsetMax) fB2 -= kPortalInset;
+							if (fB2 < fA)
+							{
+								bForced = true;
+								fA = (oMin + oMax) * 0.5f;
+								fB2 = fA;
+							}
+						}
+
+						Vector vP1, vP2;
+						if (bAxisX)
+						{
+							vP1 = { fA, flEdge, pArea->GetZ(fA, flEdge) };
+							vP2 = { fB2, flEdge, pArea->GetZ(fB2, flEdge) };
+						}
+						else
+						{
+							vP1 = { flEdge, fA, pArea->GetZ(flEdge, fA) };
+							vP2 = { flEdge, fB2, pArea->GetZ(flEdge, fB2) };
+						}
+						
+						if (bForced)
+						{
+							H::Draw.RenderLine(vP1, vP1 + Vector(0,0,16), cPortal, false);
+							continue;
+						}
+						
+						const Vector vTravel = pB->m_vCenter - pArea->m_vCenter;
+						const float fD1 = vP1.x * (-vTravel.y) + vP1.y * vTravel.x;
+						const float fD2 = vP2.x * (-vTravel.y) + vP2.y * vTravel.x;
+						
+						Vector vLeft, vRight;
+						if (fD1 <= fD2) { vLeft = vP1; vRight = vP2; }
+						else            { vLeft = vP2; vRight = vP1; }
+						
+						H::Draw.RenderLine(vLeft, vRight, cPortal, false);
+					}
+				}
+			}
+		}
+	}
 
 	if (Vars::Misc::Movement::NavEngine::Draw.Value & Vars::Misc::Movement::NavEngine::DrawEnum::Path && !m_vCrumbs.empty())
 	{

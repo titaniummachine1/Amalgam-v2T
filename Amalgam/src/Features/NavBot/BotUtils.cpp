@@ -1053,76 +1053,7 @@ void CBotUtils::HandleSmartJump(CTFPlayer* pLocal, CUserCmd* pCmd)
 		return;
 	}
 
-	// If DuckJump is enabled, use full duck jump mechanics
-	if (Vars::Misc::Movement::DuckJump.Value)
-	{
-		F::DuckJump.Run(pLocal, pCmd);
-		return;
-	}
-
-	// DuckJump disabled: use simple obstacle detection + normal jump
-	if (!pLocal->OnSolid())
-		return;
-
-	Vector vVelocity = pLocal->m_vecVelocity();
-	Vector vMoveInput = { pCmd->forwardmove, -pCmd->sidemove, 0.f };
-	
-	// Check for movement intent
-	bool bHasMovementIntent = false;
-	if (vMoveInput.Length() > 0.f || (F::NavEngine.IsPathing() && !F::NavEngine.GetCurrentPathDir().IsZero()))
-		bHasMovementIntent = true;
-
-	if (!bHasMovementIntent)
-		return;
-
-	// Calculate jump direction
-	if (vMoveInput.Length() > 0.f)
-	{
-		Vector vViewAngles = I::EngineClient->GetViewAngles();
-		Vector vForward, vRight;
-		Math::AngleVectors(vViewAngles, &vForward, &vRight, nullptr);
-		vForward.z = vRight.z = 0.f;
-		vForward.Normalize();
-		vRight.Normalize();
-
-		Vector vRotatedMoveDir = vForward * vMoveInput.x + vRight * vMoveInput.y;
-		vVelocity = vRotatedMoveDir.Normalized() * std::max(10.f, vVelocity.Length());
-	}
-
-	const float flJumpForce = 277.f;
-	const float flGravity = 800.f;
-	float flTimeToPeak = flJumpForce / flGravity;
-	float flDistTravelled = vVelocity.Length2D() * flTimeToPeak;
-	Vector vJumpDirection = vVelocity.Normalized();
-
-	if (F::NavEngine.IsPathing())
-	{
-		Vector vPathDir = F::NavEngine.GetCurrentPathDir();
-		if (!vPathDir.IsZero())
-			vJumpDirection = vPathDir;
-	}
-
-	// Simple obstacle trace (standing hull, no duck)
-	const Vector vHullMin = { -16.f, -16.f, 0.f };
-	const Vector vHullMax = { 16.f, 16.f, 82.f };
-	const Vector vStepHeight = { 0.f, 0.f, 18.f };
-
-	Vector vTraceStart = pLocal->GetAbsOrigin() + vStepHeight;
-	Vector vTraceEnd = vTraceStart + vJumpDirection * flDistTravelled;
-
-	CGameTrace trace = {};
-	CTraceFilterNavigation filter(pLocal);
-	filter.m_iPlayer = PLAYER_DEFAULT;
-	SDK::TraceHull(vTraceStart, vTraceEnd, vHullMin, vHullMax, MASK_PLAYERSOLID, &filter, &trace);
-
-	// If obstacle detected, jump
-	if (trace.fraction < 1.0f)
-	{
-		static const Vector vUp = { 0.f, 0.f, 1.f };
-		float flAngle = RAD2DEG(std::acos(trace.plane.normal.Dot(vUp)));
-		
-		// Only jump if it's not a walkable slope
-		if (flAngle >= 50.f)
-			pCmd->buttons |= IN_JUMP;
-	}
+	// SmartJump always uses full DuckJump mechanics
+	// DuckJump CVar only controls manual spacebar usage
+	F::DuckJump.Run(pLocal, pCmd);
 }

@@ -174,7 +174,7 @@ bool CDuckJump::SimulateUnduckGroundSnap(CTFPlayer* pLocal)
 
 void CDuckJump::Run(CTFPlayer* pLocal, CUserCmd* pCmd)
 {
-	if (!pLocal || !pLocal->IsAlive() || !(pCmd->buttons & IN_JUMP))
+	if (!pLocal || !pLocal->IsAlive())
 	{
 		Reset();
 		return;
@@ -202,8 +202,15 @@ void CDuckJump::Run(CTFPlayer* pLocal, CUserCmd* pCmd)
 	switch (m_eState)
 	{
 	case DUCKJUMP_IDLE:
-		if (bOnGround && bHasMovementIntent && ShouldJump(pLocal, pCmd))
-			m_eState = Vars::Misc::Movement::AutoCTap.Value ? DUCKJUMP_CTAP : DUCKJUMP_JUMP;
+		// Receive IN_JUMP signal and override it with duck jump sequence
+		if ((pCmd->buttons & IN_JUMP) && bOnGround && bHasMovementIntent)
+		{
+			if (ShouldJump(pLocal, pCmd))
+			{
+				m_eState = Vars::Misc::Movement::AutoCTap.Value ? DUCKJUMP_PREPARE : DUCKJUMP_JUMP;
+				pCmd->buttons &= ~IN_JUMP; // Override the jump flag immediately
+			}
+		}
 		break;
 
 	case DUCKJUMP_PREPARE:
@@ -247,7 +254,10 @@ void CDuckJump::Run(CTFPlayer* pLocal, CUserCmd* pCmd)
 
 	case DUCKJUMP_DESCENDING:
 	{
-		pCmd->buttons &= ~IN_DUCK;
+		// Stay ducked while airborne to keep hitbox small
+		// Only unduck when on ground or when LedgeGrab/JumpBug need to activate
+		if (!bOnGround)
+			pCmd->buttons |= IN_DUCK;
 
 		if (!bOnGround && bHasMovementIntent)
 		{

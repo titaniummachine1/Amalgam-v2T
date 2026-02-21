@@ -149,6 +149,10 @@ void CMisc::LedgeGrab(CTFPlayer* pLocal, CUserCmd* pCmd)
 	if (!Vars::Misc::Movement::LedgeGrab.Value || pLocal->m_hGroundEntity() || !pLocal->IsDucking())
 		return;
 
+	// Disable LedgeGrab when falling too fast - let JumpBug handle fall damage
+	if (pLocal->m_vecVelocity().z < -650.f)
+		return;
+
 	// LedgeGrab: when ducking in air, check if unducking would snap hull bottom to ground
 	// Hull bottom expands DOWN by 27 units when unducking in air
 	constexpr float UNDUCK_EXPANSION = 27.f;

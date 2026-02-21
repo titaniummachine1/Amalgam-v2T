@@ -910,6 +910,20 @@ bool CNavEngine::NavTo(const Vector& vDestination, PriorityListEnum::PriorityLis
 		}
 	}
 
+	if (!bSingleAreaPath && !vPath.empty())
+	{
+		for (size_t i = 0; i + 1 < vPath.size(); ++i)
+		{
+			auto pCurrentArea = reinterpret_cast<CNavArea*>(vPath[i]);
+			auto pNextArea    = reinterpret_cast<CNavArea*>(vPath[i + 1]);
+			if (!pCurrentArea || !pNextArea || !m_pMap->IsAreaValid(pCurrentArea) || !m_pMap->IsAreaValid(pNextArea))
+			{
+				m_sLastFailureReason = "Path contains invalid areas";
+				return false;
+			}
+		}
+	}
+
 	if (!bSingleAreaPath && !bNavToLocal && !vPath.empty())
 	{
 		if (vPath.empty())
@@ -924,21 +938,8 @@ bool CNavEngine::NavTo(const Vector& vDestination, PriorityListEnum::PriorityLis
 		}
 	}
 
-	if (!bSingleAreaPath && !vPath.empty())
-	{
-		for (size_t i = 0; i + 1 < vPath.size(); ++i)
-		{
-			auto pCurrentArea = reinterpret_cast<CNavArea*>(vPath[i]);
-			auto pNextArea = reinterpret_cast<CNavArea*>(vPath[i + 1]);
-			if (!pCurrentArea || !pNextArea || !m_pMap->IsAreaValid(pCurrentArea) || !m_pMap->IsAreaValid(pNextArea) || !m_pMap->HasDirectConnection(pCurrentArea, pNextArea))
-			{
-				m_sLastFailureReason = "Path contains disconnected areas";
-				return false;
-			}
-		}
-	}
-
 	m_vCrumbs.clear();
+	m_dProgressHistory.clear();
 	if (bSingleAreaPath)
 	{
 		Vector vStart = m_pLocalArea ? m_pLocalArea->m_vCenter : vDestination;
@@ -949,98 +950,58 @@ bool CNavEngine::NavTo(const Vector& vDestination, PriorityListEnum::PriorityLis
 	}
 	else
 	{
-		// Build portal list then run SSFA to get string-pulled waypoints
-		std::vector<NavPortal_t> vPortals;
-		vPortals.reserve(vPath.size());
+		// Theta* already produces any-angle paths; march each segment directly.
+		constexpr float kSubdivideSpacing = 160.f;
+		Vector    vPrev     = reinterpret_cast<CNavArea*>(vPath.front())->m_vCenter;
+		CNavArea* pPrevArea = reinterpret_cast<CNavArea*>(vPath.front());
+		if (auto pLP = H::Entities.GetLocal(); pLP && pLP->IsAlive())
+			vPrev = pLP->GetAbsOrigin();
 
-		auto FindConnDir = [](const CNavArea* pMid, const CNavArea* pOther) -> int
+		for (size_t i = 1; i < vPath.size(); i++)
 		{
-			for (int d = 0; d < 4; d++)
-				for (const auto& c : pMid->m_vConnectionsDir[d])
-					if (c.m_pArea == pOther) return d;
-			return -1;
-		};
+			auto pNextArea = reinterpret_cast<CNavArea*>(vPath[i]);
+			if (!pNextArea) continue;
 
-		for (size_t i = 0; i + 1 < vPath.size(); i++)
-		{
-			auto pArea     = reinterpret_cast<CNavArea*>(vPath.at(i));
-			auto pNextArea = reinterpret_cast<CNavArea*>(vPath.at(i + 1));
-			if (!pArea || !pNextArea)
-				continue;
-
-			const bool bIsOneWay     = m_pMap->IsOneWay(pArea, pNextArea);
-			NavPoints_t   tPoints    = m_pMap->DeterminePoints(pArea, pNextArea, bIsOneWay);
-			DropdownHint_t tDropdown = m_pMap->HandleDropdown(tPoints.m_vCenter, tPoints.m_vNext, bIsOneWay);
-
-			NavPortal_t tPortal{};
-			if (!ComputePortal(pArea, pNextArea, tPortal))
+			// Check for drop on directly-connected pairs
+			if (m_pMap->HasDirectConnection(pPrevArea, pNextArea))
 			{
-				// Fallback: use old center as forced single-point portal
-				tPortal.bForced = true;
-				tPortal.vLeft   = tDropdown.m_vAdjustedPos;
-				tPortal.vRight  = tDropdown.m_vAdjustedPos;
-				tPortal.pArea   = pNextArea;
-			}
-
-			// Drops must be walked through precisely
-			if (tDropdown.m_bRequiresDrop)
-			{
-				tPortal.bForced = true;
-				tPortal.vLeft   = tDropdown.m_vAdjustedPos;
-				tPortal.vRight  = tDropdown.m_vAdjustedPos;
-			}
-			tPortal.bDrop          = tDropdown.m_bRequiresDrop;
-			tPortal.flDropHeight   = tDropdown.m_flDropHeight;
-			tPortal.flApproachDist = tDropdown.m_flApproachDistance;
-			tPortal.vApproachDir   = tDropdown.m_vApproachDir;
-
-			vPortals.push_back(tPortal);
-
-			// Same-direction rule: if the next hop also leaves pNextArea on the same edge
-			// we entered it (e.g. entered from South, exit also to South), the bot would
-			// cut back across the entry edge. Insert a forced center waypoint so it must
-			// traverse the full area before turning around.
-			if (i + 2 < vPath.size())
-			{
-				auto pNextNextArea = reinterpret_cast<CNavArea*>(vPath.at(i + 2));
-				if (pNextNextArea)
+				const bool     bIsOneWay = m_pMap->IsOneWay(pPrevArea, pNextArea);
+				NavPoints_t    tPoints   = m_pMap->DeterminePoints(pPrevArea, pNextArea, bIsOneWay);
+				DropdownHint_t tDrop     = m_pMap->HandleDropdown(tPoints.m_vCenter, tPoints.m_vNext, bIsOneWay);
+				if (tDrop.m_bRequiresDrop)
 				{
-					const int iEntryDir = FindConnDir(pNextArea, pArea);
-					const int iExitDir  = FindConnDir(pNextArea, pNextNextArea);
-					if (iEntryDir >= 0 && iEntryDir == iExitDir)
-					{
-						NavPortal_t tCenter{};
-						tCenter.bForced = true;
-						tCenter.pArea   = pNextArea;
-						tCenter.vLeft   = tCenter.vRight = pNextArea->m_vCenter;
-						tCenter.vLeft.z = tCenter.vRight.z = pNextArea->GetZ(pNextArea->m_vCenter.x, pNextArea->m_vCenter.y);
-						vPortals.push_back(tCenter);
-					}
+					NavMarchSegment(pLocalPlayer, m_pMap.get(), vPrev, tDrop.m_vAdjustedPos, pPrevArea,
+						true, &m_vCrumbs, kSubdivideSpacing);
+					Crumb_t tDrp{};
+					tDrp.m_vPos               = tDrop.m_vAdjustedPos;
+					tDrp.m_pNavArea           = pPrevArea;
+					tDrp.m_bRequiresDrop      = true;
+					tDrp.m_flDropHeight       = tDrop.m_flDropHeight;
+					tDrp.m_flApproachDistance = tDrop.m_flApproachDistance;
+					tDrp.m_vApproachDir       = tDrop.m_vApproachDir;
+					if (m_vCrumbs.empty() || m_vCrumbs.back().m_vPos.DistToSqr(tDrp.m_vPos) >= 1.f)
+						m_vCrumbs.push_back(tDrp);
+					vPrev     = tDrop.m_vAdjustedPos;
+					pPrevArea = pNextArea;
+					continue;
 				}
 			}
-		}
 
-		// Player start position for funnel apex
-		Vector vSSFAStart = reinterpret_cast<CNavArea*>(vPath.front())->m_vCenter;
-		if (auto pLP = H::Entities.GetLocal(); pLP && pLP->IsAlive())
-			vSSFAStart = pLP->GetAbsOrigin();
-
-		constexpr float kSubdivideSpacing = 160.f;
-		auto vSSFACrumbs = RunSSFA(vSSFAStart, vDestination, vPortals);
-		Vector    vPrev     = vSSFAStart;
-		CNavArea* pPrevArea = reinterpret_cast<CNavArea*>(vPath.front());
-		for (const auto& tCrumb : vSSFACrumbs)
-		{
-			// March from vPrev to this SSFA corner, emitting navmesh-surface crumbs at each
-			// area boundary crossing (with subdivision). Hull traces confirm each step.
-			NavMarchSegment(pLocalPlayer, m_pMap.get(), vPrev, tCrumb.m_vPos, pPrevArea,
+			Vector vNext = pNextArea->m_vCenter;
+			vNext.z = pNextArea->GetZ(vNext.x, vNext.y);
+			NavMarchSegment(pLocalPlayer, m_pMap.get(), vPrev, vNext, pPrevArea,
 				true, &m_vCrumbs, kSubdivideSpacing);
-			// Push the SSFA corner itself (carries drop info etc.)
-			if (m_vCrumbs.empty() || m_vCrumbs.back().m_vPos.DistToSqr(tCrumb.m_vPos) >= 1.f)
-				m_vCrumbs.push_back(tCrumb);
-			vPrev     = tCrumb.m_vPos;
-			pPrevArea = tCrumb.m_pNavArea ? tCrumb.m_pNavArea : pPrevArea;
+			vPrev     = vNext;
+			pPrevArea = pNextArea;
 		}
+
+		// Final destination
+		Crumb_t tGoal{};
+		tGoal.m_vPos     = vDestination;
+		tGoal.m_pNavArea = pDestArea;
+		tGoal.m_vPos.z   = pDestArea->GetZ(vDestination.x, vDestination.y);
+		if (m_vCrumbs.empty() || m_vCrumbs.back().m_vPos.DistToSqr(tGoal.m_vPos) >= 1.f)
+			m_vCrumbs.push_back(tGoal);
 	}
 
 	if (!m_vCrumbs.empty())
@@ -1402,45 +1363,67 @@ void CNavEngine::CheckBlacklist(CTFPlayer* pLocal)
 // 			}
 // 		}
 // 	}
-
-// 	if (!bValid)
-// 	{
-// 		for (const auto& tConnect : pArea->m_vConnections)
-// 		{
-// 			if (tConnect.m_pArea == m_vCrumbs[0].m_pNavArea)
-// 			{
-// 				bValid = true;
-// 				break;
-// 			}
-// 		}
-// 	}
-
-// 	if (!bValid)
-// 	{
-// 		if (Vars::Debug::Logging.Value)
-// 			SDK::Output("CNavEngine", "we are off the path. repathing", { 255, 131, 131 }, OUTPUT_CONSOLE | OUTPUT_DEBUG);
-// 		AbandonPath("Off track");
-// 	}
-// }
-
 void CNavEngine::UpdateStuckTime(CTFPlayer* pLocal, CUserCmd* pCmd)
 {
 	if (IsMovementLocked(pLocal))
 	{
 		m_tInactivityTimer.Update();
+		m_dProgressHistory.clear();
 		return;
 	}
 
-	// No crumbs
 	if (m_vCrumbs.empty())
+	{
+		m_dProgressHistory.clear();
 		return;
+	}
 
 	const bool bDropCrumb = m_vCrumbs[0].m_bRequiresDrop;
+
+	// Path-progress stuck detection: sample velocity projected toward current crumb (2D).
+	// Maintain a 3-second sliding window; if the average forward speed stays below
+	// 40% of a ~300 u/s baseline (= 120 u/s) for 2+ seconds, consider us stuck.
+	constexpr float kWindow    = 3.f;
+	constexpr float kMinWindow = 2.f;
+	constexpr float kThreshold = 120.f; // units/s
+
+	const float flNow = I::GlobalVars->curtime;
+	{
+		const Vector vVel    = pLocal->GetAbsVelocity();
+		Vector       vToGoal = m_vCrumbs[0].m_vPos - pLocal->GetAbsOrigin();
+		vToGoal.z = 0.f;
+		const float flGoalLen = vToGoal.Length();
+		float flSample = 0.f;
+		if (flGoalLen > 1.f)
+			flSample = std::max(0.f, (vVel.x * vToGoal.x + vVel.y * vToGoal.y) / flGoalLen);
+		m_dProgressHistory.push_back({ flNow, flSample });
+	}
+	while (!m_dProgressHistory.empty() && flNow - m_dProgressHistory.front().flTime > kWindow)
+		m_dProgressHistory.pop_front();
+
+	bool bProgressStuck = false;
+	if (m_dProgressHistory.size() >= 2)
+	{
+		const float flElapsed = m_dProgressHistory.back().flTime - m_dProgressHistory.front().flTime;
+		if (flElapsed >= kMinWindow)
+		{
+			float flSum = 0.f;
+			for (const auto& s : m_dProgressHistory) flSum += s.flSpeed;
+			const float flAvg = flSum / static_cast<float>(m_dProgressHistory.size());
+			bProgressStuck = (flAvg < kThreshold);
+		}
+	}
+
+	if (!bProgressStuck)
+	{
+		m_tInactivityTimer.Update();
+		return;
+	}
+
 	float flTrigger = Vars::Misc::Movement::NavEngine::StuckTime.Value / 2.f;
 	if (bDropCrumb)
 		flTrigger = Vars::Misc::Movement::NavEngine::StuckTime.Value;
 
-	// We're stuck, add time to connection
 	if (m_tInactivityTimer.Check(flTrigger))
 	{
 		std::lock_guard lock(m_pMap->m_mutex);
@@ -2420,26 +2403,24 @@ void CNavEngine::Render()
 				return false;
 			};
 
-			// Wall corners: right-triangle pointing into the area at each exposed corner
+			// Wall corners: small square at every corner not covered by any neighbour
 			if (bDrawWallCorners)
 			{
-				constexpr float s = 8.f;
-				auto DrawCornerTri = [&](const Vector& v, float dx, float dy)
+				constexpr float hs = 6.f;
+				auto DrawCornerSq = [&](const Vector& v)
 				{
-					const Vector p0{ v.x,         v.y,         v.z + 1.f };
-					const Vector p1{ v.x + dx * s, v.y,         v.z + 1.f };
-					const Vector p2{ v.x,         v.y + dy * s, v.z + 1.f };
-					H::Draw.RenderTriangle(p0, p1, p2, cWallCorner, false);
-					H::Draw.RenderTriangle(p0, p2, p1, cWallCorner, false);
+					const Vector vBase{ v.x, v.y, v.z + 1.f };
+					H::Draw.RenderBox(vBase, Vector(-hs, -hs, -1.f), Vector(hs, hs, 1.f), Vector(), cWallCorner, false);
 				};
-				if ((!isCovered(0, minX) || !isCovered(3, minY)) && !isCornerCovered2D(vNw)) DrawCornerTri(vNw,  1.f,  1.f);
-				if ((!isCovered(0, maxX) || !isCovered(1, minY)) && !isCornerCovered2D(vNe)) DrawCornerTri(vNe, -1.f,  1.f);
-				if ((!isCovered(2, minX) || !isCovered(3, maxY)) && !isCornerCovered2D(vSw)) DrawCornerTri(vSw,  1.f, -1.f);
-				if ((!isCovered(2, maxX) || !isCovered(1, maxY)) && !isCornerCovered2D(vSe)) DrawCornerTri(vSe, -1.f, -1.f);
+				if (!isCornerCovered2D(vNw)) DrawCornerSq(vNw);
+				if (!isCornerCovered2D(vNe)) DrawCornerSq(vNe);
+				if (!isCornerCovered2D(vSw)) DrawCornerSq(vSw);
+				if (!isCornerCovered2D(vSe)) DrawCornerSq(vSe);
 			}
-			// Draw portals (shared X/Y overlap on A's edge, Z interpolated)
+			// Draw portals (shared X/Y overlap on A's edge, inset 24u from each end, Z interpolated)
 			if (bDrawPortals && cPortal.a)
 			{
+				constexpr float kPortalInset = 24.f;
 				for (int iDir = 0; iDir < 4; iDir++)
 				{
 					const bool bAxisX = (iDir == 0 || iDir == 2);
@@ -2452,34 +2433,47 @@ void CNavEngine::Render()
 						else        { oMin = std::max(minY, pB->m_vNwCorner.y); oMax = std::min(maxY, pB->m_vSeCorner.y); }
 						if (oMax <= oMin) continue;
 
+						const float flInsetMin = oMin + kPortalInset;
+						const float flInsetMax = oMax - kPortalInset;
+						const bool bForced = flInsetMax < flInsetMin;
+						const float fA = bForced ? (oMin + oMax) * 0.5f : flInsetMin;
+						const float fB2 = bForced ? fA : flInsetMax;
+
 						Vector vP0, vP1;
 						if (iDir == 0)
 						{
-							float t0 = dX > 0 ? (oMin - minX) / dX : 0.f, t1 = dX > 0 ? (oMax - minX) / dX : 0.f;
-							vP0 = { oMin, minY, zNW + t0 * (zNE - zNW) + 2.f };
-							vP1 = { oMax, minY, zNW + t1 * (zNE - zNW) + 2.f };
+							float t0 = dX > 0 ? (fA  - minX) / dX : 0.f, t1 = dX > 0 ? (fB2 - minX) / dX : 0.f;
+							vP0 = { fA,  minY, zNW + t0 * (zNE - zNW) + 2.f };
+							vP1 = { fB2, minY, zNW + t1 * (zNE - zNW) + 2.f };
 						}
 						else if (iDir == 1)
 						{
-							float t0 = dY > 0 ? (oMin - minY) / dY : 0.f, t1 = dY > 0 ? (oMax - minY) / dY : 0.f;
-							vP0 = { maxX, oMin, zNE + t0 * (zSE - zNE) + 2.f };
-							vP1 = { maxX, oMax, zNE + t1 * (zSE - zNE) + 2.f };
+							float t0 = dY > 0 ? (fA  - minY) / dY : 0.f, t1 = dY > 0 ? (fB2 - minY) / dY : 0.f;
+							vP0 = { maxX, fA,  zNE + t0 * (zSE - zNE) + 2.f };
+							vP1 = { maxX, fB2, zNE + t1 * (zSE - zNE) + 2.f };
 						}
 						else if (iDir == 2)
 						{
-							float t0 = dX > 0 ? (oMin - minX) / dX : 0.f, t1 = dX > 0 ? (oMax - minX) / dX : 0.f;
-							vP0 = { oMin, maxY, zSW + t0 * (zSE - zSW) + 2.f };
-							vP1 = { oMax, maxY, zSW + t1 * (zSE - zSW) + 2.f };
+							float t0 = dX > 0 ? (fA  - minX) / dX : 0.f, t1 = dX > 0 ? (fB2 - minX) / dX : 0.f;
+							vP0 = { fA,  maxY, zSW + t0 * (zSE - zSW) + 2.f };
+							vP1 = { fB2, maxY, zSW + t1 * (zSE - zSW) + 2.f };
 						}
 						else
 						{
-							float t0 = dY > 0 ? (oMin - minY) / dY : 0.f, t1 = dY > 0 ? (oMax - minY) / dY : 0.f;
-							vP0 = { minX, oMin, zNW + t0 * (zSW - zNW) + 2.f };
-							vP1 = { minX, oMax, zNW + t1 * (zSW - zNW) + 2.f };
+							float t0 = dY > 0 ? (fA  - minY) / dY : 0.f, t1 = dY > 0 ? (fB2 - minY) / dY : 0.f;
+							vP0 = { minX, fA,  zNW + t0 * (zSW - zNW) + 2.f };
+							vP1 = { minX, fB2, zNW + t1 * (zSW - zNW) + 2.f };
 						}
-						H::Draw.RenderLine(vP0, vP1, cPortal, false);
-						vP0.z += 1.f; vP1.z += 1.f;
-						H::Draw.RenderLine(vP0, vP1, cPortal, false);
+						if (bForced)
+						{
+							H::Draw.RenderBox(vP0, Vector(-3.f, -3.f, -1.f), Vector(3.f, 3.f, 1.f), Vector(), cPortal, false);
+						}
+						else
+						{
+							H::Draw.RenderLine(vP0, vP1, cPortal, false);
+							vP0.z += 1.f; vP1.z += 1.f;
+							H::Draw.RenderLine(vP0, vP1, cPortal, false);
+						}
 					}
 				}
 			}

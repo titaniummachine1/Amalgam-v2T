@@ -5,6 +5,79 @@
 #include <queue>
 #include <algorithm>
 
+// Navmesh-only LOS for Theta*: no hull traces, pure topology check.
+// Marches from pFrom's center toward pTo's center following navmesh connections.
+static bool NavMeshLOS(CMap* pMap, CNavArea* pFrom, CNavArea* pTo)
+{
+	if (!pFrom || !pTo) return false;
+	if (pFrom == pTo)   return true;
+
+	constexpr int   kMaxSteps = 64;
+	constexpr float kTol      = 16.f;
+	constexpr float kMaxFall  = 250.f;
+	constexpr float kMaxJump  = 72.f;
+
+	Vector vDir = pTo->m_vCenter - pFrom->m_vCenter;
+	vDir.z = 0.f;
+	const float flDist2D = vDir.Length();
+	if (flDist2D < 1.f) return true;
+	vDir /= flDist2D;
+
+	CNavArea* pCur = pFrom;
+	float posX = pFrom->m_vCenter.x;
+	float posY = pFrom->m_vCenter.y;
+
+	for (int iStep = 0; iStep < kMaxSteps; iStep++)
+	{
+		if (!pCur) return false;
+		if (pCur == pTo) return true;
+
+		const float tX = pTo->m_vCenter.x, tY = pTo->m_vCenter.y;
+		if (tX >= pCur->m_vNwCorner.x - kTol && tX <= pCur->m_vSeCorner.x + kTol &&
+			tY >= pCur->m_vNwCorner.y - kTol && tY <= pCur->m_vSeCorner.y + kTol)
+			return true;
+
+		const float minX = pCur->m_vNwCorner.x, maxX = pCur->m_vSeCorner.x;
+		const float minY = pCur->m_vNwCorner.y, maxY = pCur->m_vSeCorner.y;
+
+		float tExit = FLT_MAX;
+		if      (vDir.x > 0.f)  tExit = std::min(tExit, (maxX - posX) / vDir.x);
+		else if (vDir.x < 0.f)  tExit = std::min(tExit, (minX - posX) / vDir.x);
+		if      (vDir.y > 0.f)  tExit = std::min(tExit, (maxY - posY) / vDir.y);
+		else if (vDir.y < 0.f)  tExit = std::min(tExit, (minY - posY) / vDir.y);
+
+		if (tExit <= 0.f || tExit == FLT_MAX) return false;
+
+		const float eX    = posX + vDir.x * tExit;
+		const float eY    = posY + vDir.y * tExit;
+		const float eCurZ = pCur->GetZ(eX, eY);
+
+		CNavArea* pNext   = nullptr;
+		float     flBestD = FLT_MAX;
+		for (int d = 0; d < 4; d++)
+		{
+			for (const auto& conn : pCur->m_vConnectionsDir[d])
+			{
+				CNavArea* pCand = conn.m_pArea;
+				if (!pCand || !pMap->IsAreaValid(pCand)) continue;
+				if (eX < pCand->m_vNwCorner.x - kTol || eX > pCand->m_vSeCorner.x + kTol) continue;
+				if (eY < pCand->m_vNwCorner.y - kTol || eY > pCand->m_vSeCorner.y + kTol) continue;
+				const float flZDiff = pCand->GetZ(eX, eY) - eCurZ;
+				if (flZDiff > kMaxJump || flZDiff < -kMaxFall) continue;
+				const float flD = std::abs(eX - pCand->m_vCenter.x) + std::abs(eY - pCand->m_vCenter.y);
+				if (flD < flBestD) { flBestD = flD; pNext = pCand; }
+			}
+		}
+
+		if (!pNext) return false;
+		posX = std::clamp(eX, pNext->m_vNwCorner.x, pNext->m_vSeCorner.x);
+		posY = std::clamp(eY, pNext->m_vNwCorner.y, pNext->m_vSeCorner.y);
+		pCur = pNext;
+	}
+
+	return pCur == pTo;
+}
+
 // 0 = Success, 1 = No Path, 2 = Start/End invalid
 int CMap::Solve(CNavArea* pStart, CNavArea* pEnd, std::vector<void*>* path, float* cost)
 {
@@ -88,11 +161,31 @@ int CMap::Solve(CNavArea* pStart, CNavArea* pEnd, std::vector<void*>* path, floa
 				nextNode.m_bInOpen = false;
 			}
 
-			float flNewG = currentNode.m_g + flCostToNext;
+			// Theta*: try routing through grandparent (any-angle shortcut)
+			float   flNewG     = currentNode.m_g + flCostToNext;
+			CNavArea* pNewParent = pCurrentArea;
+			CNavArea* pParent    = currentNode.m_pParent;
+			if (pParent)
+			{
+				const size_t uParentIdx = static_cast<size_t>(pParent - &m_navfile.m_vAreas[0]);
+				if (uParentIdx < m_vPathNodes.size())
+				{
+					PathNode_t& parentNode = m_vPathNodes[uParentIdx];
+					if (parentNode.m_iQueryId == m_iQueryId)
+					{
+						const float flViaParent = parentNode.m_g + pParent->m_vCenter.DistTo(pNextArea->m_vCenter);
+						if (flViaParent < flNewG && NavMeshLOS(this, pParent, pNextArea))
+						{
+							flNewG     = flViaParent;
+							pNewParent = pParent;
+						}
+					}
+				}
+			}
 
 			if (flNewG < nextNode.m_g)
 			{
-				nextNode.m_pParent = pCurrentArea;
+				nextNode.m_pParent = pNewParent;
 				nextNode.m_g = flNewG;
 				float h = pNextArea->m_vCenter.DistTo(pEnd->m_vCenter);
 				nextNode.m_f = flNewG + h;

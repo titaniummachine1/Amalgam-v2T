@@ -1,6 +1,7 @@
 #pragma once
 #include "Map.h"
 #include <unordered_map>
+#include <deque>
 
 Enum(PriorityList, None,
 	Patrol = 5,
@@ -42,6 +43,8 @@ struct RespawnRoom_t
 	TriggerData_t tData = {};
 };
 
+struct ProgressSample_t { float flTime; float flSpeed; };
+
 class CNavEngine
 {
 private:
@@ -61,6 +64,8 @@ private:
 	Timer m_tInactivityTimer = {};
 	Timer m_tOffMeshTimer = {};
 	Vector m_vOffMeshTarget = {};
+
+	std::deque<ProgressSample_t> m_dProgressHistory;
 
 	bool m_bCurrentNavToLocal = false;
 	bool m_bRepathOnFail = false;

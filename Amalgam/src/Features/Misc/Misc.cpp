@@ -41,6 +41,7 @@ void CMisc::RunPre(CTFPlayer* pLocal, CUserCmd* pCmd)
 	AutoJump(pLocal, pCmd);
 	if (Vars::Misc::Movement::DuckJump.Value)
 		F::DuckJump.Run(pLocal, pCmd);
+	LedgeGrab(pLocal, pCmd);
 	EdgeJump(pLocal, pCmd);
 	if (pLocal->InCond(TF_COND_HALLOWEEN_KART))
 		return;
@@ -114,19 +115,67 @@ void CMisc::AutoJumpbug(CTFPlayer* pLocal, CUserCmd* pCmd)
 	if (!Vars::Misc::Movement::AutoJumpbug.Value || !(pCmd->buttons & IN_DUCK) || pLocal->m_hGroundEntity() || pLocal->m_vecVelocity().z > -650.f)
 		return;
 
-	float flUnduckHeight = 20 * pLocal->m_flModelScale();
-	float flTraceDistance = flUnduckHeight + 2;
-
-	CGameTrace trace = {};
-	CTraceFilterWorldAndPropsOnly filter = {};
+	// Jump bug: when unducking in air, hull bottom expands DOWN by 27 units
+	// We need the expanded hull bottom to be within 0-2u of ground for the bug to work
+	constexpr float UNDUCK_EXPANSION = 27.f;
+	constexpr float JUMPBUG_WINDOW_MAX = 2.f;
 
 	Vec3 vOrigin = pLocal->m_vecOrigin();
-	SDK::TraceHull(vOrigin, vOrigin - Vec3(0, 0, flTraceDistance), pLocal->m_vecMins(), pLocal->m_vecMaxs(), pLocal->SolidMask(), &filter, &trace);
-	if (!trace.DidHit() || trace.fraction * flTraceDistance < flUnduckHeight) // don't try if we aren't in range to unduck or are too low
+	
+	// Calculate where hull bottom will be after unduck expansion
+	float flHullBottomAfterUnduck = vOrigin.z - UNDUCK_EXPANSION;
+
+	// Trace down to find ground
+	CGameTrace trace = {};
+	CTraceFilterWorldAndPropsOnly filter = {};
+	Vec3 vTraceStart = { vOrigin.x, vOrigin.y, flHullBottomAfterUnduck };
+	Vec3 vTraceEnd = { vOrigin.x, vOrigin.y, flHullBottomAfterUnduck - 10.f };
+	SDK::Trace(vTraceStart, vTraceEnd, MASK_PLAYERSOLID, &filter, &trace);
+
+	if (!trace.DidHit())
 		return;
 
-	pCmd->buttons &= ~IN_DUCK;
-	pCmd->buttons |= IN_JUMP;
+	// Check if expanded hull bottom would be within 0-2u of ground
+	float flDistanceToGround = flHullBottomAfterUnduck - trace.endpos.z;
+	if (flDistanceToGround > 0.f && flDistanceToGround <= JUMPBUG_WINDOW_MAX)
+	{
+		pCmd->buttons &= ~IN_DUCK;
+		pCmd->buttons |= IN_JUMP;
+	}
+}
+
+void CMisc::LedgeGrab(CTFPlayer* pLocal, CUserCmd* pCmd)
+{
+	if (!Vars::Misc::Movement::LedgeGrab.Value || pLocal->m_hGroundEntity() || !pLocal->IsDucking())
+		return;
+
+	// LedgeGrab: when ducking in air, check if unducking would snap hull bottom to ground
+	// Hull bottom expands DOWN by 27 units when unducking in air
+	constexpr float UNDUCK_EXPANSION = 27.f;
+	constexpr float SNAP_WINDOW_MAX = 2.f;
+
+	Vec3 vOrigin = pLocal->m_vecOrigin();
+	
+	// Calculate where hull bottom will be after unduck expansion
+	float flHullBottomAfterUnduck = vOrigin.z - UNDUCK_EXPANSION;
+
+	// Trace down to find ground
+	CGameTrace trace = {};
+	CTraceFilterWorldAndPropsOnly filter = {};
+	Vec3 vTraceStart = { vOrigin.x, vOrigin.y, flHullBottomAfterUnduck };
+	Vec3 vTraceEnd = { vOrigin.x, vOrigin.y, flHullBottomAfterUnduck - 10.f };
+	SDK::Trace(vTraceStart, vTraceEnd, MASK_PLAYERSOLID, &filter, &trace);
+
+	if (!trace.DidHit())
+		return;
+
+	// Check if expanded hull bottom would be within 0-2u of ground (snap window)
+	float flDistanceToGround = flHullBottomAfterUnduck - trace.endpos.z;
+	if (flDistanceToGround > 0.f && flDistanceToGround <= SNAP_WINDOW_MAX)
+	{
+		// Unduck to snap to ledge
+		pCmd->buttons &= ~IN_DUCK;
+	}
 }
 
 void CMisc::AutoStrafe(CTFPlayer* pLocal, CUserCmd* pCmd)
@@ -201,28 +250,17 @@ void CMisc::BreakJump(CTFPlayer* pLocal, CUserCmd* pCmd)
 	if (!Vars::Misc::Movement::BreakJump.Value || F::AutoRocketJump.IsRunning())
 		return;
 
-	static bool bStaticJump = false;
-	const bool bLastJump = bStaticJump;
-	const bool bCurrJump = bStaticJump = pCmd->buttons & IN_JUMP;
+	// Break jump: duck on the same tick as jump to reduce jump height
+	static bool bWasOnGround = false;
+	bool bOnGround = pLocal->m_hGroundEntity().Get() != nullptr;
 
-	static int iTickSinceGrounded = -1;
-	if (pLocal->m_hGroundEntity().Get())
-		iTickSinceGrounded = -1;
-	iTickSinceGrounded++;
-
-	switch (iTickSinceGrounded)
+	// Detect jump: transitioning from ground to air with jump button
+	if (bWasOnGround && !bOnGround && (pCmd->buttons & IN_JUMP))
 	{
-	case 0:
-		if (bLastJump || !bCurrJump || pLocal->IsDucking())
-			return;
-		break;
-	case 1:
-		break;
-	default:
-		return;
+		pCmd->buttons |= IN_DUCK;
 	}
 
-	pCmd->buttons |= IN_DUCK;
+	bWasOnGround = bOnGround;
 }
 
 void CMisc::BreakShootSound(CTFPlayer* pLocal, CUserCmd* pCmd)

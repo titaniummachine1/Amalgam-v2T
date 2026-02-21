@@ -478,6 +478,8 @@ struct NavPortal_t
 	Vector    vLeft{};
 	Vector    vRight{};
 	bool      bForced{};        // width < 48u → must walk center
+	bool      bLeftIsWall{};
+	bool      bRightIsWall{};
 	bool      bDrop{};
 	float     flDropHeight{};
 	float     flApproachDist{};
@@ -492,6 +494,74 @@ struct NavPortal_t
 static float TriArea2D(const Vector& a, const Vector& b, const Vector& c)
 {
 	return (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
+}
+
+// Wall corner detection: proximity-score approach matching WallCornerGenerator.lua
+static bool IsWallCorner(const CNavArea* pArea, const Vector& vCorner, int iDir1, int iDir2)
+{
+	constexpr float fTol = 2.f;
+
+	auto axisScore = [&](float coord, float bMin, float bMax) -> float
+	{
+		if (coord < bMin - fTol || coord > bMax + fTol) return 0.f;
+		if ((coord - bMin) < fTol || (bMax - coord) < fTol) return 0.99f;
+		return 1.0f;
+	};
+
+	auto dirScore = [&](int iDir, const CNavArea*& pBestOut) -> float
+	{
+		const bool bAxisX = (iDir == 0 || iDir == 2);
+		float best = 0.f;
+		pBestOut = nullptr;
+		for (const auto& conn : pArea->m_vConnectionsDir[iDir])
+		{
+			if (!conn.m_pArea) continue;
+			const CNavArea* pB = conn.m_pArea;
+			const float bMin = bAxisX ? pB->m_vNwCorner.x : pB->m_vNwCorner.y;
+			const float bMax = bAxisX ? pB->m_vSeCorner.x : pB->m_vSeCorner.y;
+			const float coord = bAxisX ? vCorner.x : vCorner.y;
+			const float s = axisScore(coord, bMin, bMax);
+			if (s > best) { best = s; pBestOut = pB; }
+		}
+		return best;
+	};
+
+	auto hasDiagonalCover = [&](const CNavArea* pNeighbor1) -> bool
+	{
+		if (!pNeighbor1) return false;
+		const bool bX1 = (iDir1 == 0 || iDir1 == 2);
+		const bool bX2 = (iDir2 == 0 || iDir2 == 2);
+		for (int d = 0; d < 4; d++)
+		{
+			for (const auto& diagConn : pNeighbor1->m_vConnectionsDir[d])
+			{
+				const CNavArea* pD = diagConn.m_pArea;
+				if (!pD || pD == pArea) continue;
+				const float s1 = axisScore(bX1 ? vCorner.x : vCorner.y,
+					bX1 ? pD->m_vNwCorner.x : pD->m_vNwCorner.y,
+					bX1 ? pD->m_vSeCorner.x : pD->m_vSeCorner.y);
+				const float s2 = axisScore(bX2 ? vCorner.x : vCorner.y,
+					bX2 ? pD->m_vNwCorner.x : pD->m_vNwCorner.y,
+					bX2 ? pD->m_vSeCorner.x : pD->m_vSeCorner.y);
+				if (s1 > 0.f || s2 > 0.f) return true;
+			}
+		}
+		return false;
+	};
+
+	if (pArea->m_vConnectionsDir[iDir1].empty()) return true;
+	if (pArea->m_vConnectionsDir[iDir2].empty()) return true;
+
+	const CNavArea* pN1 = nullptr;
+	const CNavArea* pN2 = nullptr;
+	const float s1 = dirScore(iDir1, pN1);
+	const float s2 = dirScore(iDir2, pN2);
+	const float total = s1 + s2;
+
+	if (total >= 1.985f) return false;          // 2.0 or 1.99 → surrounded
+	if (total > 1.975f)                         // ≈1.98 → concave, need diagonal
+		return !hasDiagonalCover(pN1);
+	return true;                                 // < 1.98 → wall corner
 }
 
 static bool ComputePortal(CNavArea* pFrom, CNavArea* pTo, NavPortal_t& tOut)
@@ -527,21 +597,42 @@ static bool ComputePortal(CNavArea* pFrom, CNavArea* pTo, NavPortal_t& tOut)
 		tOut.bForced = false;
 
 		Vector vP1, vP2;
+		bool bP1IsWall = false, bP2IsWall = false;
+
 		if (bAxisX)
 		{
 			vP1 = { oMin, flEdge, pFrom->GetZ(oMin, flEdge) };
 			vP2 = { oMax, flEdge, pFrom->GetZ(oMax, flEdge) };
+
+			// iDir=0 (N, min-Y) or iDir=2 (S, max-Y)
+			// oMin corresponds to min-X (W, 3), oMax corresponds to max-X (E, 1)
+			bP1IsWall = IsWallCorner(pFrom, vP1, iDir, 3) || IsWallCorner(pTo, vP1, iDir == 0 ? 2 : 0, 3);
+			bP2IsWall = IsWallCorner(pFrom, vP2, iDir, 1) || IsWallCorner(pTo, vP2, iDir == 0 ? 2 : 0, 1);
 		}
 		else
 		{
 			vP1 = { flEdge, oMin, pFrom->GetZ(flEdge, oMin) };
 			vP2 = { flEdge, oMax, pFrom->GetZ(flEdge, oMax) };
+
+			// iDir=1 (E, max-X) or iDir=3 (W, min-X)
+			// oMin corresponds to min-Y (N, 0), oMax corresponds to max-Y (S, 2)
+			bP1IsWall = IsWallCorner(pFrom, vP1, iDir, 0) || IsWallCorner(pTo, vP1, iDir == 1 ? 3 : 1, 0);
+			bP2IsWall = IsWallCorner(pFrom, vP2, iDir, 2) || IsWallCorner(pTo, vP2, iDir == 1 ? 3 : 1, 2);
 		}
+
 		const Vector vTravel = pTo->m_vCenter - pFrom->m_vCenter;
 		const float fD1 = vP1.x * (-vTravel.y) + vP1.y * vTravel.x;
 		const float fD2 = vP2.x * (-vTravel.y) + vP2.y * vTravel.x;
-		if (fD1 <= fD2) { tOut.vLeft = vP1; tOut.vRight = vP2; }
-		else            { tOut.vLeft = vP2; tOut.vRight = vP1; }
+		if (fD1 <= fD2)
+		{
+			tOut.vLeft = vP1; tOut.vRight = vP2;
+			tOut.bLeftIsWall = bP1IsWall; tOut.bRightIsWall = bP2IsWall;
+		}
+		else
+		{
+			tOut.vLeft = vP2; tOut.vRight = vP1;
+			tOut.bLeftIsWall = bP2IsWall; tOut.bRightIsWall = bP1IsWall;
+		}
 		return true;
 	}
 	return false;
@@ -595,10 +686,57 @@ static std::vector<Crumb_t> RunSSFA(
 
 	for (int i = 0; i <= n; i++)
 	{
-		const Vector& vNewLeft  = (i < n) ? vPortals[i].vLeft  : vGoal;
-		const Vector& vNewRight = (i < n) ? vPortals[i].vRight : vGoal;
+		Vector vNewLeft  = (i < n) ? vPortals[i].vLeft  : vGoal;
+		Vector vNewRight = (i < n) ? vPortals[i].vRight : vGoal;
 		CNavArea* pNewArea      = (i < n) ? vPortals[i].pArea  : vPortals[n - 1].pArea;
 		const NavPortal_t* pNewPortal = (i < n) ? &vPortals[i] : nullptr;
+
+		// Dynamic funnel shrinking for the next immediate portals
+		// This ensures we have 24 unit clearance from wall corners based on our approach angle
+		if (i < n && i <= iApexIdx + 2 && pNewPortal)
+		{
+			Vector vPortalDir = vNewRight - vNewLeft;
+			float flPortalWidth = vPortalDir.Length2D();
+			if (flPortalWidth > 1.f)
+			{
+				vPortalDir.x /= flPortalWidth;
+				vPortalDir.y /= flPortalWidth;
+				vPortalDir.z = 0.f;
+
+				Vector vApproach = vNewLeft - vApex;
+				float flApproachLen = vApproach.Length2D();
+				if (flApproachLen > 1.f)
+				{
+					vApproach.x /= flApproachLen;
+					vApproach.y /= flApproachLen;
+					vApproach.z = 0.f;
+
+					// Portal normal is perpendicular to portal direction
+					Vector vPortalNormal(-vPortalDir.y, vPortalDir.x, 0.f);
+					
+					// Angle between approach and portal normal
+					float flCosTheta = vApproach.Dot(vPortalNormal);
+					float flSinTheta = vApproach.Dot(vPortalDir);
+					
+					// Calculate required clearance (24 units box)
+					float flClearance = 24.f * (std::abs(flCosTheta) + std::abs(flSinTheta));
+					
+					// We only want to shrink a side if it's actually against a wall
+					bool bLeftIsWall = pNewPortal->bLeftIsWall;
+					bool bRightIsWall = pNewPortal->bRightIsWall;
+					
+					// Clamp clearance so we don't invert the portal, leave at least 1 unit width
+					float flMaxClearance = std::max(0.f, (flPortalWidth - 1.f) * (bLeftIsWall && bRightIsWall ? 0.5f : 1.f));
+					flClearance = std::min(flClearance, flMaxClearance);
+
+					if (flClearance > 0.f)
+					{
+						if (bLeftIsWall)  vNewLeft  += (vPortalDir * flClearance);
+						if (bRightIsWall) vNewRight -= (vPortalDir * flClearance);
+					}
+				}
+			}
+		}
 
 		// Update right side of funnel
 		if (TriArea2D(vApex, vFRight, vNewRight) <= 0.f)
@@ -2355,91 +2493,23 @@ void CNavEngine::Render()
 			// Corner→adjacent dirs: NW→(0,3), NE→(0,1), SW→(2,3), SE→(2,1)
 			if (bDrawWallCorners)
 			{
-				constexpr float fTol = 2.f;
-
-				// Score: 1.0 = strictly within, 0.99 = at edge, 0.0 = outside
-				auto axisScore = [&](float coord, float bMin, float bMax) -> float
+				constexpr float hs = 12.f;
+				auto DrawCornerTri = [&](const Vector& v, float dx, float dy)
 				{
-					if (coord < bMin - fTol || coord > bMax + fTol) return 0.f;
-					if ((coord - bMin) < fTol || (bMax - coord) < fTol) return 0.99f;
-					return 1.0f;
+					const Vector vP1{ v.x, v.y, v.z + 1.f };
+					const Vector vP2{ v.x + dx, v.y, v.z + 1.f };
+					const Vector vP3{ v.x, v.y + dy, v.z + 1.f };
+					H::Draw.RenderTriangle(vP1, vP2, vP3, cWallCorner, false);
 				};
 
-				// Best score from any neighbor in iDir for this corner's axis coordinate
-				// Also returns the best contributing neighbor via pBestOut
-				auto dirScore = [&](int iDir, const Vector& vCorner, const CNavArea*& pBestOut) -> float
-				{
-					const bool bAxisX = (iDir == 0 || iDir == 2);
-					float best = 0.f;
-					pBestOut = nullptr;
-					for (const auto& conn : pArea->m_vConnectionsDir[iDir])
-					{
-						if (!conn.m_pArea) continue;
-						const CNavArea* pB = conn.m_pArea;
-						const float bMin = bAxisX ? pB->m_vNwCorner.x : pB->m_vNwCorner.y;
-						const float bMax = bAxisX ? pB->m_vSeCorner.x : pB->m_vSeCorner.y;
-						const float coord = bAxisX ? vCorner.x : vCorner.y;
-						const float s = axisScore(coord, bMin, bMax);
-						if (s > best) { best = s; pBestOut = pB; }
-					}
-					return best;
-				};
-
-				// Diagonal check: does any connection of pNeighbor1 contain the corner
-				// on either of the two adjacent axis directions?
-				auto hasDiagonalCover = [&](const CNavArea* pNeighbor1, int iDir1, int iDir2, const Vector& vCorner) -> bool
-				{
-					if (!pNeighbor1) return false;
-					const bool bX1 = (iDir1 == 0 || iDir1 == 2);
-					const bool bX2 = (iDir2 == 0 || iDir2 == 2);
-					for (int d = 0; d < 4; d++)
-					{
-						for (const auto& diagConn : pNeighbor1->m_vConnectionsDir[d])
-						{
-							const CNavArea* pD = diagConn.m_pArea;
-							if (!pD || pD == pArea) continue;
-							const float s1 = axisScore(bX1 ? vCorner.x : vCorner.y,
-								bX1 ? pD->m_vNwCorner.x : pD->m_vNwCorner.y,
-								bX1 ? pD->m_vSeCorner.x : pD->m_vSeCorner.y);
-							const float s2 = axisScore(bX2 ? vCorner.x : vCorner.y,
-								bX2 ? pD->m_vNwCorner.x : pD->m_vNwCorner.y,
-								bX2 ? pD->m_vSeCorner.x : pD->m_vSeCorner.y);
-							if (s1 > 0.f || s2 > 0.f) return true;
-						}
-					}
-					return false;
-				};
-
-				auto isWallCorner = [&](const Vector& vCorner, int iDir1, int iDir2) -> bool
-				{
-					// Fast path: no neighbors on either adjacent side → exposed corner
-					if (pArea->m_vConnectionsDir[iDir1].empty()) return true;
-					if (pArea->m_vConnectionsDir[iDir2].empty()) return true;
-
-					const CNavArea* pN1 = nullptr;
-					const CNavArea* pN2 = nullptr;
-					const float s1 = dirScore(iDir1, vCorner, pN1);
-					const float s2 = dirScore(iDir2, vCorner, pN2);
-					const float total = s1 + s2;
-
-					if (total >= 1.985f) return false;          // 2.0 or 1.99 → surrounded
-					if (total > 1.975f)                         // ≈1.98 → concave, need diagonal
-						return !hasDiagonalCover(pN1, iDir1, iDir2, vCorner);
-					return true;                                 // < 1.98 → wall corner
-				};
-
-				constexpr float hs = 6.f;
-				auto DrawCornerSq = [&](const Vector& v)
-				{
-					const Vector vBase{ v.x, v.y, v.z + 1.f };
-					H::Draw.RenderBox(vBase, Vector(-hs, -hs, -1.f), Vector(hs, hs, 1.f), Vector(), cWallCorner, false);
-				};
-
-				// NW=(0,3) NE=(0,1) SW=(2,3) SE=(2,1)
-				if (isWallCorner(vNw, 0, 3)) DrawCornerSq(vNw);
-				if (isWallCorner(vNe, 0, 1)) DrawCornerSq(vNe);
-				if (isWallCorner(vSw, 2, 3)) DrawCornerSq(vSw);
-				if (isWallCorner(vSe, 2, 1)) DrawCornerSq(vSe);
+				// NW=(0,3) -> dx=-hs, dy=-hs
+				if (IsWallCorner(pArea, vNw, 0, 3)) DrawCornerTri(vNw, -hs, -hs);
+				// NE=(0,1) -> dx=+hs, dy=-hs
+				if (IsWallCorner(pArea, vNe, 0, 1)) DrawCornerTri(vNe, hs, -hs);
+				// SW=(2,3) -> dx=-hs, dy=+hs
+				if (IsWallCorner(pArea, vSw, 2, 3)) DrawCornerTri(vSw, -hs, hs);
+				// SE=(2,1) -> dx=+hs, dy=+hs
+				if (IsWallCorner(pArea, vSe, 2, 1)) DrawCornerTri(vSe, hs, hs);
 			}
 			// Draw portals (shared X/Y overlap on A's edge, inset 24u only at wall-corner endpoints)
 			if (bDrawPortals && cPortal.a)

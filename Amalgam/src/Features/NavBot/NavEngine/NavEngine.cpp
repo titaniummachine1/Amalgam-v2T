@@ -2583,8 +2583,6 @@ void CNavEngine::Render()
 						else
 						{
 							H::Draw.RenderLine(vP0, vP1, cPortal, false);
-							vP0.z += 1.f; vP1.z += 1.f;
-							H::Draw.RenderLine(vP0, vP1, cPortal, false);
 						}
 					}
 				}

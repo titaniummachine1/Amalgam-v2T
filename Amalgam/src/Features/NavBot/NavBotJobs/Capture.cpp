@@ -69,8 +69,32 @@ bool CNavBotCapture::GetCtfGoal(CTFPlayer* pLocal, int iOurTeam, int iEnemyTeam,
 	if (!F::FlagController.GetPosition(iEnemyTeam, vPosition))
 	{
 		if (!F::FlagController.GetPosition(0, vPosition)) // Try neutral flag
-			return false;
-		iEnemyTeam = 0; // Use neutral team if found
+		{
+			// FlagController has no data yet (flag dormant or not yet seen).
+			// Scan WorldObjective entities directly so we always have a target.
+			CCaptureFlag* pBestFlag = nullptr;
+			float flBestDist = FLT_MAX;
+			const Vector vLocalOrigin = pLocal->GetAbsOrigin();
+			for (auto pEntity : H::Entities.GetGroup(EntityEnum::WorldObjective))
+			{
+				if (pEntity->GetClassID() != ETFClassID::CCaptureFlag)
+					continue;
+				auto pFlag = pEntity->As<CCaptureFlag>();
+				const int iFlagTeam = pFlag->m_iTeamNum();
+				if (iFlagTeam != iEnemyTeam && iFlagTeam != 0)
+					continue;
+				const float flDist = vLocalOrigin.DistToSqr(pFlag->GetAbsOrigin());
+				if (flDist < flBestDist)
+				{
+					flBestDist = flDist;
+					pBestFlag = pFlag;
+				}
+			}
+			if (!pBestFlag)
+				return false;
+			vPosition = pBestFlag->GetAbsOrigin();
+		}
+		iEnemyTeam = 0;
 	}
 
 	// Get Flag related information

@@ -1047,12 +1047,11 @@ void CBotUtils::Reset()
 
 void CBotUtils::HandleSmartJump(CTFPlayer* pLocal, CUserCmd* pCmd)
 {
-	if (!pLocal || !pLocal->IsAlive() || F::AutoRocketJump.IsRunning())
+	if (!pLocal || !pLocal->IsAlive() || F::AutoRocketJump.IsRunning() || !Vars::Misc::Movement::NavBot::SmartJump.Value)
 	{
 		F::DuckJump.Reset();
 		return;
 	}
 
-	// Use the standalone DuckJump feature
 	F::DuckJump.Run(pLocal, pCmd);
 }

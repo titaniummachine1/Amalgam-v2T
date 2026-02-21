@@ -545,7 +545,7 @@ static bool IsWallCorner(const CNavArea* pArea, const Vector& vCorner, int iDir1
 				const float s2 = axisScore(bX2 ? vCorner.x : vCorner.y,
 					bX2 ? pD->m_vNwCorner.x : pD->m_vNwCorner.y,
 					bX2 ? pD->m_vSeCorner.x : pD->m_vSeCorner.y);
-				if (s1 > 0.f || s2 > 0.f) return true;
+				if (s1 > 0.f && s2 > 0.f) return true;
 			}
 		}
 		return false;

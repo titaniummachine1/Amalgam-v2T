@@ -338,9 +338,16 @@ void CNamedPipe::ConnectAndMaintainPipe()
 				F::NamedPipe.QueueMessage("FPS", std::to_string(F::NamedPipe.tInfo.m_iCurrentFPS), false);
 				F::NamedPipe.QueueMessage("Kills", std::to_string(F::NamedPipe.tInfo.m_iCurrentKills), false);
 				F::NamedPipe.QueueMessage("Deaths", std::to_string(F::NamedPipe.tInfo.m_iCurrentDeaths), false);
+				
+				bool bInGame = F::NamedPipe.tInfo.m_bInGame;
+				uint32_t uAccountID = F::NamedPipe.tInfo.m_uAccountID;
+				std::string sCurrentServer = F::NamedPipe.tInfo.m_sCurrentServer;
+				
+				lock.unlock(); // Unlock before processing queue to prevent blocking game threads during pipe I/O
+				
 				F::NamedPipe.ProcessMessageQueue();
 
-				if (!F::NamedPipe.tInfo.m_bInGame)
+				if (!bInGame)
 				{
 					// Not in game: ensure panel receives disconnect-ish state
 					F::NamedPipe.QueueMessage("Status", "NotInGame", true);
@@ -348,10 +355,9 @@ void CNamedPipe::ConnectAndMaintainPipe()
 				}
 				else
 				{
-					uint32_t uAccountID = F::NamedPipe.tInfo.m_uAccountID;
-					if (F::NamedPipe.tInfo.m_uAccountID != 0)
+					if (uAccountID != 0)
 					{
-						std::string sContent = std::format("{}|{}|{}", F::NamedPipe.tInfo.m_uAccountID, F::NamedPipe.tInfo.m_sCurrentServer, F::NamedPipe.m_iBotId);
+						std::string sContent = std::format("{}|{}|{}", uAccountID, sCurrentServer, F::NamedPipe.m_iBotId);
 						F::NamedPipe.QueueMessage("LocalBot", sContent, true);
 						F::NamedPipe.Log("Queued local bot ID broadcast: " + sContent);
 
@@ -359,7 +365,6 @@ void CNamedPipe::ConnectAndMaintainPipe()
 							F::NamedPipe.ProcessMessageQueue();
 					}
 				}
-				lock.unlock();
 			}
 
 			char cBuffer[4096] = { 0 };
@@ -458,11 +463,6 @@ void CNamedPipe::ConnectAndMaintainPipe()
 			std::this_thread::sleep_for(std::chrono::milliseconds(50));
 	}
 
-	{
-		std::lock_guard lock(F::NamedPipe.m_messageQueueMutex);
-		F::NamedPipe.m_vMessageQueue.clear();
-	}
-
 	if (F::NamedPipe.m_hPipe != INVALID_HANDLE_VALUE)
 	{
 		try
@@ -472,7 +472,15 @@ void CNamedPipe::ConnectAndMaintainPipe()
 				std::string sContent = std::to_string(F::NamedPipe.m_iBotId) + ":Status:Disconnecting";
 				std::string sMessage = base64_encode(sContent) + "\n";
 				DWORD dwBytesWritten = 0;
-				WriteFile(F::NamedPipe.m_hPipe, sMessage.c_str(), static_cast<DWORD>(sMessage.length()), &dwBytesWritten, NULL);
+				OVERLAPPED tOverlapped = { 0 };
+				tOverlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+				if (tOverlapped.hEvent != NULL)
+				{
+					BOOL bSuccess = WriteFile(F::NamedPipe.m_hPipe, sMessage.c_str(), static_cast<DWORD>(sMessage.length()), &dwBytesWritten, &tOverlapped);
+					if (!bSuccess && GetLastError() == ERROR_IO_PENDING)
+						WaitForSingleObject(tOverlapped.hEvent, 1000);
+					CloseHandle(tOverlapped.hEvent);
+				}
 			}
 		}
 		catch (...)

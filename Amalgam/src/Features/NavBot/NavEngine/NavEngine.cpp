@@ -571,7 +571,7 @@ static bool ComputePortal(CNavArea* pFrom, CNavArea* pTo, NavPortal_t& tOut)
 		tOut.pArea = pTo;
 		
 		// If the shared overlap is too small, don't inset at all and force center
-		if (oMax - oMin <= 48.f)
+		if (oMax - oMin <= 10.f)
 		{
 			const float flMid = (oMin + oMax) * 0.5f;
 			tOut.bForced = true;
@@ -608,10 +608,10 @@ static bool ComputePortal(CNavArea* pFrom, CNavArea* pTo, NavPortal_t& tOut)
 					vP2 = { flEdge, flPMax, pFrom->GetZ(flEdge, flPMax) };
 				}
 				const Vector vTravel = pTo->m_vCenter - pFrom->m_vCenter;
-				const float cross1 = vTravel.x * vP1.y - vTravel.y * vP1.x;
-				const float cross2 = vTravel.x * vP2.y - vTravel.y * vP2.x;
-				if (cross1 > cross2) { tOut.vLeft = vP1; tOut.vRight = vP2; }
-				else                 { tOut.vLeft = vP2; tOut.vRight = vP1; }
+				const float fD1 = vP1.x * (-vTravel.y) + vP1.y * vTravel.x;
+				const float fD2 = vP2.x * (-vTravel.y) + vP2.y * vTravel.x;
+				if (fD1 <= fD2) { tOut.vLeft = vP1; tOut.vRight = vP2; }
+				else            { tOut.vLeft = vP2; tOut.vRight = vP1; }
 			}
 		}
 		return true;
@@ -661,79 +661,84 @@ static std::vector<Crumb_t> RunSSFA(
 		vOut.push_back(c);
 	};
 
-	auto RunFunnelSegment = [&](const Vector& vSegStart, const Vector& vSegGoal, int iFirstPortal, int iEndPortal, CNavArea* pGoalArea)
+	// Initialize funnel as degenerate point at start so portal[0] is handled uniformly
+	Vector vApex   = vStart;
+	Vector vFLeft  = vStart;
+	Vector vFRight = vStart;
+	int iApexIdx   = -1;
+	int iLeftIdx   = -1;
+	int iRightIdx  = -1;
+
+	const int n = (int)vPortals.size();
+
+	for (int i = 0; i <= n; i++)
 	{
-		Vector vApex   = vSegStart;
-		Vector vFLeft  = vSegStart;
-		Vector vFRight = vSegStart;
-		int iApexIdx   = iFirstPortal - 1;
-		int iLeftIdx   = iFirstPortal - 1;
-		int iRightIdx  = iFirstPortal - 1;
+		const Vector& vNewLeft  = (i < n) ? vPortals[i].vLeft  : vGoal;
+		const Vector& vNewRight = (i < n) ? vPortals[i].vRight : vGoal;
+		CNavArea* pNewArea      = (i < n) ? vPortals[i].pArea  : vPortals[n - 1].pArea;
+		const NavPortal_t* pNewPortal = (i < n) ? &vPortals[i] : nullptr;
 
-		for (int i = iFirstPortal; i <= iEndPortal; i++)
+		// Update right side of funnel
+		if (TriArea2D(vApex, vFRight, vNewRight) <= 0.f)
 		{
-			const Vector& vNewLeft  = (i < iEndPortal) ? vPortals[i].vLeft  : vSegGoal;
-			const Vector& vNewRight = (i < iEndPortal) ? vPortals[i].vRight : vSegGoal;
-			CNavArea* pNewArea      = (i < iEndPortal) ? vPortals[i].pArea  : pGoalArea;
-
-			// Update right side of funnel
-			if (TriArea2D(vApex, vFRight, vNewRight) <= 0.f)
+			if (vApex == vFRight || TriArea2D(vApex, vFLeft, vNewRight) > 0.f)
 			{
-				if (vApex == vFRight || TriArea2D(vApex, vFLeft, vNewRight) > 0.f)
-				{
-					vFRight   = vNewRight;
-					iRightIdx = i;
-				}
-				else
-				{
-					Emit(vFLeft, (iLeftIdx >= iFirstPortal && iLeftIdx < iEndPortal) ? vPortals[iLeftIdx].pArea : pNewArea);
-					vApex   = vFLeft;
-					iApexIdx = iLeftIdx;
-					vFLeft  = vApex; vFRight = vApex;
-					iLeftIdx = iRightIdx = iApexIdx;
-					i = iApexIdx;
-					continue;
-				}
+				vFRight   = vNewRight;
+				iRightIdx = i;
 			}
-
-			// Update left side of funnel
-			if (TriArea2D(vApex, vFLeft, vNewLeft) >= 0.f)
+			else
 			{
-				if (vApex == vFLeft || TriArea2D(vApex, vFRight, vNewLeft) < 0.f)
-				{
-					vFLeft   = vNewLeft;
-					iLeftIdx = i;
-				}
-				else
-				{
-					Emit(vFRight, (iRightIdx >= iFirstPortal && iRightIdx < iEndPortal) ? vPortals[iRightIdx].pArea : pNewArea);
-					vApex   = vFRight;
-					iApexIdx = iRightIdx;
-					vFLeft  = vApex; vFRight = vApex;
-					iLeftIdx = iRightIdx = iApexIdx;
-					i = iApexIdx;
-					continue;
-				}
+				// Right crossed left → emit left, restart
+				Emit(vFLeft, (iLeftIdx >= 0 && iLeftIdx < n) ? vPortals[iLeftIdx].pArea : pNewArea,
+				     (iLeftIdx >= 0 && iLeftIdx < n) ? &vPortals[iLeftIdx] : nullptr);
+				vApex   = vFLeft;
+				iApexIdx = iLeftIdx;
+				vFLeft  = vApex; vFRight = vApex;
+				iLeftIdx = iRightIdx = iApexIdx;
+				i = (iApexIdx >= 0) ? iApexIdx : 0;
+				continue;
 			}
 		}
-	};
 
-	Vector vSubStart = vStart;
-	int iStartIndex = 0;
-
-	for (int i = 0; i < (int)vPortals.size(); i++)
-	{
-		if (vPortals[i].bForced)
+		// Update left side of funnel
+		if (TriArea2D(vApex, vFLeft, vNewLeft) >= 0.f)
 		{
-			RunFunnelSegment(vSubStart, vPortals[i].vLeft, iStartIndex, i, vPortals[i].pArea);
-			Emit(vPortals[i].vLeft, vPortals[i].pArea, &vPortals[i]);
-			vSubStart = vPortals[i].vLeft;
-			iStartIndex = i + 1;
+			if (vApex == vFLeft || TriArea2D(vApex, vFRight, vNewLeft) < 0.f)
+			{
+				vFLeft   = vNewLeft;
+				iLeftIdx = i;
+			}
+			else
+			{
+				// Left crossed right → emit right, restart
+				Emit(vFRight, (iRightIdx >= 0 && iRightIdx < n) ? vPortals[iRightIdx].pArea : pNewArea,
+				     (iRightIdx >= 0 && iRightIdx < n) ? &vPortals[iRightIdx] : nullptr);
+				vApex   = vFRight;
+				iApexIdx = iRightIdx;
+				vFLeft  = vApex; vFRight = vApex;
+				iLeftIdx = iRightIdx = iApexIdx;
+				i = (iApexIdx >= 0) ? iApexIdx : 0;
+				continue;
+			}
+		}
+
+		// Forced portal (narrow choke or drop): emit center directly, restart funnel.
+		// We do this at the END of the loop body so SSFA can resolve any corner crossings first.
+		if (i < n && pNewPortal && pNewPortal->bForced)
+		{
+			if (vFLeft == vNewLeft && vFRight == vNewRight)
+			{
+				Emit(vNewLeft, pNewArea, pNewPortal);
+				vApex   = vNewLeft;
+				vFLeft  = vNewLeft;
+				vFRight = vNewLeft;
+				iApexIdx = iLeftIdx = iRightIdx = i;
+			}
 		}
 	}
 
-	RunFunnelSegment(vSubStart, vGoal, iStartIndex, (int)vPortals.size(), vPortals.empty() ? nullptr : vPortals.back().pArea);
-	Emit(vGoal, vPortals.empty() ? nullptr : vPortals.back().pArea);
+	// Final destination
+	Emit(vGoal, vPortals[n - 1].pArea);
 	return vOut;
 }
 
@@ -2556,70 +2561,38 @@ void CNavEngine::Render()
 
 						const bool bInsetMin = bInsetMinFrom || bInsetMinTo;
 						const bool bInsetMax = bInsetMaxFrom || bInsetMaxTo;
-						
-						bool bForced = false;
-						float fA = oMin;
-						float fB2 = oMax;
-						
-						if (oMax - oMin <= 48.f)
-						{
-							bForced = true;
-							fA = (oMin + oMax) * 0.5f;
-							fB2 = fA;
-						}
-						else
-						{
-							fA = bInsetMin ? oMin + kPortalInset : oMin;
-							fB2 = bInsetMax ? oMax - kPortalInset : oMax;
-							if (fB2 < fA)
-							{
-								bForced = true;
-								fA = (oMin + oMax) * 0.5f;
-								fB2 = fA;
-							}
-						}
 
-						// N/E portals sit 2 units higher than S/W portals so bidirectional
-						// portals at the same physical boundary render at different heights.
-						const float flZBias = (iDir < 2) ? 4.f : 2.f;
-						Vector vP0, vP1;
-						if (iDir == 0)
-						{
-							float t0 = dX > 0 ? (fA  - minX) / dX : 0.f, t1 = dX > 0 ? (fB2 - minX) / dX : 0.f;
-							vP0 = { fA,  minY, zNW + t0 * (zNE - zNW) + flZBias };
-							vP1 = { fB2, minY, zNW + t1 * (zNE - zNW) + flZBias };
-						}
-						else if (iDir == 1)
-						{
-							float t0 = dY > 0 ? (fA  - minY) / dY : 0.f, t1 = dY > 0 ? (fB2 - minY) / dY : 0.f;
-							vP0 = { maxX, fA,  zNE + t0 * (zSE - zNE) + flZBias };
-							vP1 = { maxX, fB2, zNE + t1 * (zSE - zNE) + flZBias };
-						}
-						else if (iDir == 2)
-						{
-							float t0 = dX > 0 ? (fA  - minX) / dX : 0.f, t1 = dX > 0 ? (fB2 - minX) / dX : 0.f;
-							vP0 = { fA,  maxY, zSW + t0 * (zSE - zSW) + flZBias };
-							vP1 = { fB2, maxY, zSW + t1 * (zSE - zSW) + flZBias };
-						}
-						else
-						{
-							float t0 = dY > 0 ? (fA  - minY) / dY : 0.f, t1 = dY > 0 ? (fB2 - minY) / dY : 0.f;
-							vP0 = { minX, fA,  zNW + t0 * (zSW - zNW) + flZBias };
-							vP1 = { minX, fB2, zNW + t1 * (zSW - zNW) + flZBias };
-						}
-						if (bForced)
-						{
-							H::Draw.RenderBox(vP0, Vector(-3.f, -3.f, -1.f), Vector(3.f, 3.f, 1.f), Vector(), cPortal, false);
-						}
-						else
-						{
-							H::Draw.RenderLine(vP0, vP1, cPortal, false);
-						}
-					}
-				}
-			}
-		}
-	}
+                    Vector vP1, vP2;
+                    if (bAxisX)
+                    {
+                        vP1 = { fA, flEdge, pArea->GetZ(fA, flEdge) };
+                        vP2 = { fB2, flEdge, pArea->GetZ(fB2, flEdge) };
+                    }
+                    else
+                    {
+                        vP1 = { flEdge, fA, pArea->GetZ(flEdge, fA) };
+                        vP2 = { flEdge, fB2, pArea->GetZ(flEdge, fB2) };
+                    }
+                    
+                    if (bForced)
+                    {
+                        H::Draw.RenderLine(vP1, vP1 + Vector(0,0,16), cPortal, false);
+                        continue;
+                    }
+                    
+                    const Vector vTravel = pB->m_vCenter - pArea->m_vCenter;
+                    const float fD1 = vP1.x * (-vTravel.y) + vP1.y * vTravel.x;
+                    const float fD2 = vP2.x * (-vTravel.y) + vP2.y * vTravel.x;
+                    
+                    Vector vLeft, vRight;
+                    if (fD1 <= fD2) { vLeft = vP1; vRight = vP2; }
+                    else            { vLeft = vP2; vRight = vP1; }
+                    
+                    H::Draw.RenderLine(vLeft, vRight, cPortal, false);
+                }
+            }
+        }
+    }
 
 	if (Vars::Misc::Movement::NavEngine::Draw.Value & Vars::Misc::Movement::NavEngine::DrawEnum::Path && !m_vCrumbs.empty())
 	{

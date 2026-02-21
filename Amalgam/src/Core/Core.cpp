@@ -181,9 +181,7 @@ void CCore::Loop()
 
 void CCore::Unload()
 {
-#ifdef TEXTMODE
 	F::NamedPipe.Shutdown();
-#endif
 	if (m_bFailed)
 	{
 		LogFailText();

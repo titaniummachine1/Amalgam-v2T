@@ -68,11 +68,16 @@ public:
 	Vector m_vPredictedJumpPos = {};
 	Vector m_vJumpPeakPos = {};
 	std::vector<std::pair<Vector, Vector>> m_vWalkableSegments = {};
+	std::vector<Vector> m_vSimulationPath = {};
 
 	int m_iCurrentSlot = -1;
 	int m_iBestSlot = -1;
 	ClosestEnemy_t m_tClosestEnemy = {};
 	Vec3 m_vLastAngles = {};
+
+	float m_flLastObstacleHeight = 0.f;
+	int m_iStateStartTime = 0;
+	EJumpState m_eLastState = STATE_AWAITING_JUMP;
 
 	bool ShouldAssist(CTFPlayer* pLocal, int iEntIdx);
 	ShouldTargetEnum::ShouldTargetEnum ShouldTarget(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, int iEntIdx);
@@ -89,6 +94,10 @@ public:
 	void InvalidateLLAP();
 
 	bool IsSurfaceWalkable(const Vector& vNormal);
+	bool CheckJumpable(const Vector& vHitPos, const Vector& vMoveDirection, CTFPlayer* pLocal, float& out_minTicksNeeded);
+	bool SimulateMovementTick(Vector& vStartPos, Vector& vVelocity, CTFPlayer* pLocal, bool& out_hitObstacle, bool& out_canJump, float& out_minJumpTicks);
+	bool IsNearPayload(const Vector& vPos);
+	bool SmartJumpDetection(CTFPlayer* pLocal, CUserCmd* pCmd);
 	bool SmartJump(CTFPlayer* pLocal, CUserCmd* pCmd);
 	void HandleSmartJump(CTFPlayer* pLocal, CUserCmd* pCmd);
 	void ForceJump() { if (m_eJumpState == STATE_AWAITING_JUMP) m_eJumpState = Vars::Misc::Movement::AutoCTap.Value ? STATE_CTAP : STATE_JUMP; }

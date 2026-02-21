@@ -521,6 +521,12 @@ struct NavPortal_t
 // Compute the inset portal for a connection A→B.
 // vLeft/vRight are the endpoints on A's shared boundary, projected to navmesh surface.
 // If shared boundary < 48u, bForced=true and vLeft==vRight==center.
+// Signed 2D area of triangle ABC in XY plane (positive = CCW)
+static float TriArea2D(const Vector& a, const Vector& b, const Vector& c)
+{
+	return (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
+}
+
 static bool ComputePortal(CNavArea* pFrom, CNavArea* pTo, NavPortal_t& tOut)
 {
 	constexpr float kInset = 24.f;
@@ -531,7 +537,7 @@ static bool ComputePortal(CNavArea* pFrom, CNavArea* pTo, NavPortal_t& tOut)
 	const float minXB = pTo->m_vNwCorner.x,   maxXB = pTo->m_vSeCorner.x;
 	const float minYB = pTo->m_vNwCorner.y,   maxYB = pTo->m_vSeCorner.y;
 
-	// iDir → [iPerpAtMin, iPerpAtMax]
+	// iDir -> [iPerpAtMin, iPerpAtMax]
 	static constexpr int kPerpMin[4] = { 3, 0, 3, 0 };
 	static constexpr int kPerpMax[4] = { 1, 2, 1, 2 };
 
@@ -549,7 +555,7 @@ static bool ComputePortal(CNavArea* pFrom, CNavArea* pTo, NavPortal_t& tOut)
 		else        { oMin = std::max(minYA, minYB); oMax = std::min(maxYA, maxYB); }
 
 		const float flEdge = (iDir == 0) ? minYA : (iDir == 1) ? maxXA : (iDir == 2) ? maxYA : minXA;
-		
+
 		const float pFromMin = bAxisX ? minXA : minYA;
 		const float pFromMax = bAxisX ? maxXA : maxYA;
 		const float pToMin   = bAxisX ? minXB : minYB;
@@ -558,71 +564,38 @@ static bool ComputePortal(CNavArea* pFrom, CNavArea* pTo, NavPortal_t& tOut)
 		// The opposite direction for pTo to check its walls
 		const int iOppositeDir = (iDir + 2) % 4;
 
-		const bool bInsetMinFrom = IsWallCornerAtEndpoint(pFrom, oMin, pFromMin, kPerpMin[iDir], flEdge, fTol);
-		const bool bInsetMaxFrom = IsWallCornerAtEndpoint(pFrom, oMax, pFromMax, kPerpMax[iDir], flEdge, fTol);
-		
-		const bool bInsetMinTo = IsWallCornerAtEndpoint(pTo, oMin, pToMin, kPerpMax[iOppositeDir], flEdge, fTol);
-		const bool bInsetMaxTo = IsWallCornerAtEndpoint(pTo, oMax, pToMax, kPerpMin[iOppositeDir], flEdge, fTol);
+		// STEP 1: Boundary clamping
+		float overlapLeft = oMin;
+		float overlapRight = oMax;
 
-		// If either side considers it a wall corner, we inset
-		const bool bInsetMin = bInsetMinFrom || bInsetMinTo;
-		const bool bInsetMax = bInsetMaxFrom || bInsetMaxTo;
-		
+		float commonMin = std::max(pFromMin, pToMin);
+		float commonMax = std::min(pFromMax, pToMax);
+
+		overlapLeft = std::clamp(overlapLeft, commonMin, commonMax);
+		overlapRight = std::clamp(overlapRight, commonMin, commonMax);
+
 		tOut.pArea = pTo;
-		
-		// If the shared overlap is too small, don't inset at all and force center
-		if (oMax - oMin <= 10.f)
+
+		tOut.bForced = false;
+		Vector vP1, vP2;
+		if (bAxisX)
 		{
-			const float flMid = (oMin + oMax) * 0.5f;
-			tOut.bForced = true;
-			if (bAxisX) { tOut.vLeft = { flMid, flEdge, pFrom->GetZ(flMid, flEdge) }; }
-			else        { tOut.vLeft = { flEdge, flMid, pFrom->GetZ(flEdge, flMid) }; }
-			tOut.vRight = tOut.vLeft;
+			vP1 = { overlapLeft, flEdge, pFrom->GetZ(overlapLeft, flEdge) };
+			vP2 = { overlapRight, flEdge, pFrom->GetZ(overlapRight, flEdge) };
 		}
 		else
 		{
-			const float flPMin = bInsetMin ? oMin + kInset : oMin;
-			const float flPMax = bInsetMax ? oMax - kInset : oMax;
-			
-			// If insetting would flip the portal, force center
-			if (flPMax < flPMin)
-			{
-				const float flMid = (oMin + oMax) * 0.5f;
-				tOut.bForced = true;
-				if (bAxisX) { tOut.vLeft = { flMid, flEdge, pFrom->GetZ(flMid, flEdge) }; }
-				else        { tOut.vLeft = { flEdge, flMid, pFrom->GetZ(flEdge, flMid) }; }
-				tOut.vRight = tOut.vLeft;
-			}
-			else
-			{
-				tOut.bForced = false;
-				Vector vP1, vP2;
-				if (bAxisX)
-				{
-					vP1 = { flPMin, flEdge, pFrom->GetZ(flPMin, flEdge) };
-					vP2 = { flPMax, flEdge, pFrom->GetZ(flPMax, flEdge) };
-				}
-				else
-				{
-					vP1 = { flEdge, flPMin, pFrom->GetZ(flEdge, flPMin) };
-					vP2 = { flEdge, flPMax, pFrom->GetZ(flEdge, flPMax) };
-				}
-				const Vector vTravel = pTo->m_vCenter - pFrom->m_vCenter;
-				const float fD1 = vP1.x * (-vTravel.y) + vP1.y * vTravel.x;
-				const float fD2 = vP2.x * (-vTravel.y) + vP2.y * vTravel.x;
-				if (fD1 <= fD2) { tOut.vLeft = vP1; tOut.vRight = vP2; }
-				else            { tOut.vLeft = vP2; tOut.vRight = vP1; }
-			}
+			vP1 = { flEdge, overlapLeft, pFrom->GetZ(flEdge, overlapLeft) };
+			vP2 = { flEdge, overlapRight, pFrom->GetZ(flEdge, overlapRight) };
 		}
+		const Vector vTravel = pTo->m_vCenter - pFrom->m_vCenter;
+		const float fD1 = vP1.x * (-vTravel.y) + vP1.y * vTravel.x;
+		const float fD2 = vP2.x * (-vTravel.y) + vP2.y * vTravel.x;
+		if (fD1 <= fD2) { tOut.vLeft = vP1; tOut.vRight = vP2; }
+		else            { tOut.vLeft = vP2; tOut.vRight = vP1; }
 		return true;
 	}
 	return false;
-}
-
-// Signed 2D area of triangle ABC in XY plane (positive = CCW)
-static float TriArea2D(const Vector& a, const Vector& b, const Vector& c)
-{
-	return (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
 }
 
 // Simple Stupid Funnel Algorithm over a sequence of portals.
@@ -2559,47 +2532,26 @@ void CNavEngine::Render()
 						const bool bInsetMinTo = IsWallCornerAtEndpoint(const_cast<CNavArea*>(pB), oMin, pToMin, kPerpMax[iOppositeDir], flEdge, fPTol);
 						const bool bInsetMaxTo = IsWallCornerAtEndpoint(const_cast<CNavArea*>(pB), oMax, pToMax, kPerpMin[iOppositeDir], flEdge, fPTol);
 
-						const bool bInsetMin = bInsetMinFrom || bInsetMinTo;
-						const bool bInsetMax = bInsetMaxFrom || bInsetMaxTo;
+						// STEP 1: Boundary clamping
+						float overlapLeft = oMin;
+						float overlapRight = oMax;
 
-						bool bForced = false;
-						float fA = oMin;
-						float fB2 = oMax;
-						
-						if (oMax - oMin <= 10.f)
-						{
-							bForced = true;
-							fA = (oMin + oMax) * 0.5f;
-							fB2 = fA;
-						}
-						else
-						{
-							if (bInsetMin) fA += kPortalInset;
-							if (bInsetMax) fB2 -= kPortalInset;
-							if (fB2 < fA)
-							{
-								bForced = true;
-								fA = (oMin + oMax) * 0.5f;
-								fB2 = fA;
-							}
-						}
+						float commonMin = std::max(pAreaMin, pToMin);
+						float commonMax = std::min(pAreaMax, pToMax);
+
+						overlapLeft = std::clamp(overlapLeft, commonMin, commonMax);
+						overlapRight = std::clamp(overlapRight, commonMin, commonMax);
 
 						Vector vP1, vP2;
 						if (bAxisX)
 						{
-							vP1 = { fA, flEdge, pArea->GetZ(fA, flEdge) };
-							vP2 = { fB2, flEdge, pArea->GetZ(fB2, flEdge) };
+							vP1 = { overlapLeft, flEdge, pArea->GetZ(overlapLeft, flEdge) };
+							vP2 = { overlapRight, flEdge, pArea->GetZ(overlapRight, flEdge) };
 						}
 						else
 						{
-							vP1 = { flEdge, fA, pArea->GetZ(flEdge, fA) };
-							vP2 = { flEdge, fB2, pArea->GetZ(flEdge, fB2) };
-						}
-						
-						if (bForced)
-						{
-							H::Draw.RenderLine(vP1, vP1 + Vector(0,0,16), cPortal, false);
-							continue;
+							vP1 = { flEdge, overlapLeft, pArea->GetZ(flEdge, overlapLeft) };
+							vP2 = { flEdge, overlapRight, pArea->GetZ(flEdge, overlapRight) };
 						}
 						
 						const Vector vTravel = pB->m_vCenter - pArea->m_vCenter;
@@ -2628,29 +2580,32 @@ void CNavEngine::Render()
 		const Color_t cArrow = Vars::Colors::NavbotPath.Value;
 		constexpr float flHeadLen = 12.f;
 		constexpr float flHeadWidth = 6.f;
-		for (size_t i = 0; i < m_vCrumbs.size() - 1; i++)
+		
+		auto DrawArrow = [&](const Vector& vStart, const Vector& vEnd, Color_t color)
 		{
-			const Vector& vFrom = m_vCrumbs[i].m_vPos;
-			const Vector& vTo   = m_vCrumbs[i + 1].m_vPos;
-			H::Draw.RenderLine(vFrom, vTo, cArrow, false);
+			H::Draw.RenderLine(vStart, vEnd, color, false);
 
-			// Arrowhead: compute perpendicular in XY plane
-			Vector vDir = vTo - vFrom;
+			Vector vDir = vEnd - vStart;
 			const float flLen = vDir.Length();
 			if (flLen < 1.f)
-				continue;
+				return;
 			vDir /= flLen;
 
-			// Right-hand perpendicular in XY, keep Z flat
-			const Vector vRight(vDir.y, -vDir.x, 0.f);
+			const Vector vRightDir(vDir.y, -vDir.x, 0.f);
+			const Vector vBase = vEnd - vDir * flHeadLen;
+			const Vector vLeftCorner = vBase - vRightDir * flHeadWidth;
+			const Vector vRightCorner = vBase + vRightDir * flHeadWidth;
 
-			// Tip is at vTo, base is flHeadLen back along vDir
-			const Vector vBase = vTo - vDir * flHeadLen;
-			const Vector vLeft  = vBase - vRight * flHeadWidth;
-			const Vector vRight2 = vBase + vRight * flHeadWidth;
+			H::Draw.RenderTriangle(vEnd, vLeftCorner, vRightCorner, color, false);
+			H::Draw.RenderTriangle(vEnd, vRightCorner, vLeftCorner, color, false);
+		};
 
-			H::Draw.RenderTriangle(vTo, vLeft, vRight2, cArrow, false);
-			H::Draw.RenderTriangle(vTo, vRight2, vLeft, cArrow, false);
+		// Draw arrow from player to first crumb
+		DrawArrow(pLocal->GetAbsOrigin() + Vector(0, 0, 2.f), m_vCrumbs[0].m_vPos, cArrow);
+
+		for (size_t i = 0; i < m_vCrumbs.size() - 1; i++)
+		{
+			DrawArrow(m_vCrumbs[i].m_vPos, m_vCrumbs[i + 1].m_vPos, cArrow);
 		}
 	}
 

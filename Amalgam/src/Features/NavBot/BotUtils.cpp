@@ -1042,117 +1042,263 @@ void CBotUtils::Reset()
 	m_mAutoScopeCache.clear();
 	m_vCloseEnemies.clear();
 	m_tClosestEnemy = {};
-	m_iBestSlot = -1;
-	m_iCurrentSlot = -1;
-	m_eJumpState = STATE_AWAITING_JUMP;
-	m_vPredictedJumpPos = {};
-	m_vJumpPeakPos = {};
-	InvalidateLLAP();
 }
 
 bool CBotUtils::IsSurfaceWalkable(const Vector& vNormal)
 {
 	static const Vector vUp = { 0.f, 0.f, 1.f };
 	float flAngle = RAD2DEG(std::acos(vNormal.Dot(vUp)));
-	return flAngle < 50.f; // MAX_WALKABLE_ANGLE
+	return flAngle < 55.f; // Max walkable angle increased to 55 as per user script
+}
+
+bool CBotUtils::CheckJumpable(const Vector& vHitPos, const Vector& vMoveDirection, CTFPlayer* pLocal, float& out_minTicksNeeded)
+{
+	if (vMoveDirection.IsZero())
+	{
+		out_minTicksNeeded = 0;
+		return false;
+	}
+
+	Vector vCheckPos = vHitPos + vMoveDirection * 1.f;
+	const float flMaxJumpHeight = 72.f;
+	Vector vAbovePos = vCheckPos + Vector(0.f, 0.f, flMaxJumpHeight);
+
+	const Vector vHullMin = pLocal->GetCollideable()->OBBMins();
+	const Vector vHullMax = pLocal->GetCollideable()->OBBMaxs();
+
+	CGameTrace trace = {};
+	CTraceFilterHitscan filter(pLocal);
+	SDK::TraceHull(vAbovePos, vCheckPos, vHullMin, vHullMax, MASK_PLAYERSOLID, &filter, &trace);
+
+	if (IsSurfaceWalkable(trace.plane.normal))
+	{
+		float flTraceLength = (vAbovePos - vCheckPos).Length();
+		float flObstacleHeight = flTraceLength * (1.f - trace.fraction);
+
+		if (trace.fraction == 0.f)
+			return false;
+
+		if (flObstacleHeight <= 0.f || flObstacleHeight > 100.f)
+			return false;
+
+		if (flObstacleHeight > 18.f)
+		{
+			m_flLastObstacleHeight = vHitPos.z + flObstacleHeight;
+
+			const float flJumpVel = 277.f; // SJC.JUMP_FORCE
+			const float flGravity = 800.f; // SJC.GRAVITY
+			const float flTickInterval = I::GlobalVars->interval_per_tick;
+
+			float a = 0.5f * flGravity;
+			float b = -flJumpVel;
+			float c = flObstacleHeight;
+			float discriminant = b * b - 4.f * a * c;
+
+			int minTicksNeeded = 0;
+			if (discriminant >= 0.f)
+			{
+				float t1 = (-b - std::sqrt(discriminant)) / (2.f * a);
+				float t2 = (-b + std::sqrt(discriminant)) / (2.f * a);
+				float t = std::min(t1 > 0.f ? t1 : FLT_MAX, t2 > 0.f ? t2 : FLT_MAX);
+				if (t != FLT_MAX)
+					minTicksNeeded = static_cast<int>(std::ceil(t / flTickInterval));
+			}
+			else
+			{
+				float flTimeToMaxHeight = std::sqrt(2.f * flMaxJumpHeight / flGravity);
+				float flFraction = flObstacleHeight / flMaxJumpHeight;
+				float flEstimatedTime = flTimeToMaxHeight * flFraction;
+				minTicksNeeded = static_cast<int>(std::ceil(flEstimatedTime / flTickInterval));
+			}
+
+			m_vJumpPeakPos = trace.endpos;
+			out_minTicksNeeded = static_cast<float>(minTicksNeeded);
+			return true;
+		}
+	}
+	
+	out_minTicksNeeded = 0;
+	return false;
+}
+
+bool CBotUtils::SimulateMovementTick(Vector& vStartPos, Vector& vVelocity, CTFPlayer* pLocal, bool& out_hitObstacle, bool& out_canJump, float& out_minJumpTicks)
+{
+	const Vector vUpVector = { 0.f, 0.f, 1.f };
+	const Vector vStepVector = { 0.f, 0.f, 18.f };
+	const Vector vHullMin = pLocal->GetCollideable()->OBBMins();
+	const Vector vHullMax = pLocal->GetCollideable()->OBBMaxs();
+	const float flDeltaTime = I::GlobalVars->interval_per_tick;
+	
+	Vector vMoveDirection = vVelocity.Normalized();
+	Vector vTargetPos = vStartPos + vVelocity * flDeltaTime;
+
+	CTraceFilterHitscan filter(pLocal);
+	CGameTrace startPostrace = {};
+	SDK::TraceHull(vStartPos + vStepVector, vStartPos, vHullMin, vHullMax, MASK_PLAYERSOLID, &filter, &startPostrace);
+	Vector vDownStartPos = startPostrace.endpos;
+
+	CGameTrace uptrace = {};
+	SDK::TraceHull(vTargetPos + vStepVector, vTargetPos, vHullMin, vHullMax, MASK_PLAYERSOLID, &filter, &uptrace);
+	Vector vDownTargetPos = uptrace.endpos;
+
+	CGameTrace wallTrace = {};
+	SDK::TraceHull(vDownStartPos + vStepVector, vDownTargetPos + vStepVector, vHullMin, vHullMax, MASK_PLAYERSOLID, &filter, &wallTrace);
+
+	if (wallTrace.fraction != 0.f)
+		vTargetPos = wallTrace.endpos;
+
+	CGameTrace groundTrace = {};
+	SDK::TraceHull(vTargetPos, vTargetPos - vStepVector * 2.f, vHullMin, vHullMax, MASK_PLAYERSOLID, &filter, &groundTrace);
+	if (groundTrace.fraction < 1.f)
+		vTargetPos = groundTrace.endpos;
+	else
+		return false;
+
+	SDK::TraceHull(vTargetPos, vTargetPos - vStepVector, vHullMin, vHullMax, MASK_PLAYERSOLID, &filter, &groundTrace);
+	if (groundTrace.fraction < 1.f)
+		vTargetPos = groundTrace.endpos;
+	else
+		return false;
+
+	out_hitObstacle = wallTrace.fraction < 1.f;
+	out_canJump = false;
+	out_minJumpTicks = 0.f;
+
+	if (out_hitObstacle)
+	{
+		out_canJump = CheckJumpable(vTargetPos, vMoveDirection, pLocal, out_minJumpTicks);
+		Vector vWallNormal = wallTrace.plane.normal;
+		float flWallAngle = RAD2DEG(std::acos(vWallNormal.Dot(vUpVector)));
+
+		if (flWallAngle > 55.f)
+		{
+			float flDot = vVelocity.Dot(vWallNormal);
+			vVelocity -= vWallNormal * flDot;
+		}
+	}
+
+	vStartPos = vTargetPos;
+	return true;
+}
+
+bool CBotUtils::IsNearPayload(const Vector& vPos)
+{
+	// Check if near any payload cart
+	for (auto pEntity : H::Entities.GetGroup(EntityEnum::WorldObjective))
+	{
+		if (!pEntity || pEntity->IsDormant()) continue;
+		
+		Vector vPayloadPos = pEntity->GetAbsOrigin();
+		if ((vPos - vPayloadPos).Length() < 200.f)
+			return true;
+			
+		Vector vGroundPos = { vPayloadPos.x, vPayloadPos.y, vPayloadPos.z - 80.f };
+		if ((vPos - vGroundPos).Length() < 150.f)
+			return true;
+	}
+	return false;
+}
+
+bool CBotUtils::SmartJumpDetection(CTFPlayer* pLocal, CUserCmd* pCmd)
+{
+	if (!pLocal || !pLocal->OnSolid())
+		return false;
+
+	Vector vLocalPos = pLocal->GetAbsOrigin();
+	if (IsNearPayload(vLocalPos))
+		return false;
+
+	Vector vMoveIntent = { pCmd->forwardmove, -pCmd->sidemove, 0.f };
+	Vector vViewAngles = I::EngineClient->GetViewAngles();
+
+	if (vMoveIntent.Length() == 0.f && F::NavEngine.IsPathing())
+	{
+		Vector vPathDir = F::NavEngine.GetCurrentPathDir();
+		if (!vPathDir.IsZero())
+		{
+			Vector vForward, vRight;
+			Math::AngleVectors(vViewAngles, &vForward, &vRight, nullptr);
+			vMoveIntent = { vPathDir.Dot(vForward) * 450.f, (-vPathDir.Dot(vRight)) * 450.f, 0.f };
+		}
+	}
+
+	Vector vForward, vRight;
+	Math::AngleVectors(vViewAngles, &vForward, &vRight, nullptr);
+	vForward.z = vRight.z = 0.f;
+	vForward.Normalize();
+	vRight.Normalize();
+
+	Vector vRotatedMoveIntent = vForward * vMoveIntent.x + vRight * vMoveIntent.y;
+	Vector vMoveDir = vRotatedMoveIntent.Normalized();
+	float flMoveLength = vRotatedMoveIntent.Length();
+
+	float flMinMoveSpeed = 450.f;
+	float flSimulationSpeed = std::max(flMoveLength, flMinMoveSpeed);
+
+	if (flMoveLength <= 1.f)
+	{
+		vMoveDir = vForward;
+		flSimulationSpeed = flMinMoveSpeed;
+	}
+
+	Vector vCurrentVel = pLocal->m_vecVelocity();
+	float flHorizontalSpeed = vCurrentVel.Length2D();
+
+	if (flHorizontalSpeed <= 1.f)
+		flHorizontalSpeed = flSimulationSpeed;
+
+	Vector vInitialVelocity = vMoveDir * flHorizontalSpeed;
+
+	const float flJumpVel = 277.f;
+	const float flGravity = 800.f;
+	const float flTickInterval = I::GlobalVars->interval_per_tick;
+
+	float flTimeToPeak = flJumpVel / flGravity;
+	int iJumpPeakTicks = static_cast<int>(std::ceil(flTimeToPeak / flTickInterval));
+	int iTotalSimulationTicks = iJumpPeakTicks;
+
+	Vector vCurrentPos = vLocalPos;
+	Vector vCurrentVelocity = vInitialVelocity;
+
+	m_vSimulationPath.clear();
+	m_vSimulationPath.push_back(vCurrentPos);
+
+	for (int tick = 1; tick <= iTotalSimulationTicks; tick++)
+	{
+		bool bHitObstacle = false, bCanJump = false;
+		float flMinJumpTicks = 0.f;
+
+		if (!SimulateMovementTick(vCurrentPos, vCurrentVelocity, pLocal, bHitObstacle, bCanJump, flMinJumpTicks))
+			break;
+
+		m_vSimulationPath.push_back(vCurrentPos);
+
+		if (bHitObstacle && bCanJump)
+		{
+			if (tick <= static_cast<int>(flMinJumpTicks))
+			{
+				if (IsNearPayload(vCurrentPos) || IsNearPayload(vLocalPos))
+					return false;
+
+				m_vPredictedJumpPos = vCurrentPos;
+				return true;
+			}
+			else
+				return false;
+		}
+	}
+	return false;
 }
 
 bool CBotUtils::SmartJump(CTFPlayer* pLocal, CUserCmd* pCmd)
 {
 	if (!pLocal || !pLocal->IsAlive() || !Vars::Misc::Movement::NavBot::SmartJump.Value) return false;
-
-	if (pLocal->OnSolid())
-	{
-		Vector vVelocity = pLocal->m_vecVelocity();
-		Vector vMoveInput = { pCmd->forwardmove, -pCmd->sidemove, 0.f };
-		if (vMoveInput.Length() > 0.f)
-		{
-			Vector vViewAngles = I::EngineClient->GetViewAngles();
-			Vector vForward, vRight;
-			Math::AngleVectors(vViewAngles, &vForward, &vRight, nullptr);
-			vForward.z = vRight.z = 0.f;
-			vForward.Normalize();
-			vRight.Normalize();
-
-			Vector vRotatedMoveDir = vForward * vMoveInput.x + vRight * vMoveInput.y;
-			vVelocity = vRotatedMoveDir.Normalized() * std::max(10.f, vVelocity.Length());
-		}
-
-		const float flJumpForce = 277.f;
-		const float flGravity = 800.f;
-		float flTimeToPeak = flJumpForce / flGravity;
-		float flDistTravelled = vVelocity.Length2D() * flTimeToPeak;
-		Vector vJumpDirection = vVelocity.Normalized();
-		if (F::NavEngine.IsPathing())
-		{
-			Vector vPathDir = F::NavEngine.GetCurrentPathDir();
-			if (!vPathDir.IsZero())
-			{
-				if (vJumpDirection.Dot(vPathDir) < 0.5f)
-					return false;
-
-				auto pCrumbs = F::NavEngine.GetCrumbs();
-				if (pCrumbs->size() > 1)
-				{
-					Vector vNextDir = ((*pCrumbs)[1].m_vPos - (*pCrumbs)[0].m_vPos);
-					vNextDir.z = 0.f;
-					if (vNextDir.Normalize() > 0.1f && vPathDir.Dot(vNextDir) < 0.707f)
-					{
-						if (pLocal->GetAbsOrigin().DistTo((*pCrumbs)[0].m_vPos) < 100.f)
-							return false;
-					}
-				}
-
-				vJumpDirection = vPathDir;
-			}
-		}
-		Vector vJumpPeakPos = pLocal->GetAbsOrigin() + vJumpDirection * flDistTravelled;
-		m_vJumpPeakPos = vJumpPeakPos;
-
-		const Vector vHullMin = { -23.99f, -23.99f, 0.f };
-		const Vector vHullMax = { 23.99f, 23.99f, 62.f };
-		const Vector vHullMinSjump = { -16.f, -16.f, 0.f };
-		const Vector vHullMaxSjump = { 16.f, 16.f, 62.f };
-		const Vector vStepHeight = { 0.f, 0.f, 18.f };
-		const Vector vMaxJumpHeight = { 0.f, 0.f, 72.f };
-
-		Vector vTraceStart = pLocal->GetAbsOrigin() + vStepHeight;
-		Vector vTraceEnd = vTraceStart + vJumpDirection * flDistTravelled;
-
-		CGameTrace forwardTrace = {};
-		CTraceFilterNavigation filter(pLocal);
-		filter.m_iPlayer = PLAYER_DEFAULT;
-		SDK::TraceHull(vTraceStart, vTraceEnd, vHullMinSjump, vHullMaxSjump, MASK_PLAYERSOLID, &filter, &forwardTrace);
-
-		m_vPredictedJumpPos = forwardTrace.endpos;
-
-		if (forwardTrace.fraction < 1.0f && !IsSurfaceWalkable(forwardTrace.plane.normal))
-		{
-			CGameTrace downwardTrace = {};
-			SDK::TraceHull(forwardTrace.endpos, forwardTrace.endpos - vMaxJumpHeight, vHullMinSjump, vHullMaxSjump, MASK_PLAYERSOLID_BRUSHONLY, &filter, &downwardTrace);
-
-			Vector vLandingPos = downwardTrace.endpos + vJumpDirection * 10.f;
-			CGameTrace landingTrace = {};
-			SDK::TraceHull(vLandingPos + vMaxJumpHeight, vLandingPos, vHullMin, vHullMax, MASK_PLAYERSOLID_BRUSHONLY, &filter, &landingTrace);
-
-			m_vPredictedJumpPos = landingTrace.endpos;
-
-			if (landingTrace.fraction > 0.f && landingTrace.fraction < 0.75f) // JUMP_FRACTION
-			{
-				if (IsSurfaceWalkable(landingTrace.plane.normal))
-					return true;
-			}
-		}
-	}
-	else if (pCmd->buttons & IN_JUMP)
-		return true;
-
-	return false;
+	return SmartJumpDetection(pLocal, pCmd);
 }
 
 void CBotUtils::HandleSmartJump(CTFPlayer* pLocal, CUserCmd* pCmd)
 {
-	if (!pLocal || !pLocal->IsAlive() || F::AutoRocketJump.IsRunning())
+	if (!pLocal || !pLocal->IsAlive() || F::AutoRocketJump.IsRunning() || !Vars::Misc::Movement::NavBot::SmartJump.Value)
 	{
 		m_eJumpState = STATE_AWAITING_JUMP;
 		return;
@@ -1160,15 +1306,22 @@ void CBotUtils::HandleSmartJump(CTFPlayer* pLocal, CUserCmd* pCmd)
 
 	bool bOnGround = pLocal->OnSolid();
 	bool bDucking = pLocal->IsDucking();
+	bool bHasMovementIntent = (pCmd->forwardmove != 0.f || pCmd->sidemove != 0.f) || (F::NavEngine.IsPathing() && !F::NavEngine.GetCurrentPathDir().IsZero());
 
-	if (bOnGround && bDucking)
-		m_eJumpState = STATE_AWAITING_JUMP;
+	if (bOnGround && bDucking && bHasMovementIntent && m_eJumpState == STATE_AWAITING_JUMP)
+	{
+		if (SmartJumpDetection(pLocal, pCmd))
+			m_eJumpState = STATE_CTAP;
+	}
 
 	switch (m_eJumpState)
 	{
 	case STATE_AWAITING_JUMP:
-		if (SmartJump(pLocal, pCmd))
-			m_eJumpState = (Vars::Misc::Movement::AutoCTap.Value && bOnGround) ? STATE_CTAP : STATE_JUMP;
+		if (bOnGround && bHasMovementIntent)
+		{
+			if (SmartJumpDetection(pLocal, pCmd))
+				m_eJumpState = (Vars::Misc::Movement::AutoCTap.Value && bOnGround) ? STATE_CTAP : STATE_JUMP;
+		}
 		break;
 	case STATE_CTAP:
 		pCmd->buttons |= IN_DUCK;
@@ -1181,28 +1334,65 @@ void CBotUtils::HandleSmartJump(CTFPlayer* pLocal, CUserCmd* pCmd)
 		m_eJumpState = STATE_ASCENDING;
 		break;
 	case STATE_ASCENDING:
+	{
 		pCmd->buttons |= IN_DUCK;
-		if (pLocal->m_vecVelocity().z <= 0.f)
+		bool bShouldUnduck = pLocal->m_vecVelocity().z <= 0.f;
+
+		// Improved duck grab check
+		if (!bShouldUnduck && Vars::Misc::Movement::AutoCTap.Value && m_flLastObstacleHeight > 0.f)
+		{
+			Vector vCurrentPos = pLocal->GetAbsOrigin();
+			if (vCurrentPos.z > m_flLastObstacleHeight)
+			{
+				Vector vTraceStart = { vCurrentPos.x, vCurrentPos.y, m_flLastObstacleHeight + 1.f };
+				Vector vTraceEnd = { vCurrentPos.x, vCurrentPos.y, m_flLastObstacleHeight - 10.f };
+				
+				const Vector vHullMin = pLocal->GetCollideable()->OBBMins();
+				const Vector vHullMax = pLocal->GetCollideable()->OBBMaxs();
+				
+				CGameTrace obstacleTrace = {};
+				CTraceFilterHitscan filter(pLocal);
+				SDK::TraceHull(vTraceStart, vTraceEnd, vHullMin, vHullMax, MASK_PLAYERSOLID, &filter, &obstacleTrace);
+
+				if (obstacleTrace.fraction < 1.f)
+					bShouldUnduck = true;
+			}
+		}
+
+		if (bShouldUnduck)
 			m_eJumpState = STATE_DESCENDING;
-		else if (bOnGround)
-			m_eJumpState = STATE_AWAITING_JUMP;
 		break;
+	}
 	case STATE_DESCENDING:
 		pCmd->buttons &= ~IN_DUCK;
-		if (!bOnGround)
+		if (bHasMovementIntent)
 		{
-			if (SmartJump(pLocal, pCmd))
+			if (SmartJumpDetection(pLocal, pCmd))
 			{
 				pCmd->buttons &= ~IN_DUCK;
 				pCmd->buttons |= IN_JUMP;
 				m_eJumpState = (Vars::Misc::Movement::AutoCTap.Value && bOnGround) ? STATE_CTAP : STATE_JUMP;
 			}
+
+			if (bOnGround)
+				m_eJumpState = STATE_AWAITING_JUMP;
 		}
-		else
-		{
-			pCmd->buttons |= IN_DUCK;
+		else if (bOnGround)
 			m_eJumpState = STATE_AWAITING_JUMP;
-		}
 		break;
+	}
+
+	if (!m_iStateStartTime)
+		m_iStateStartTime = I::GlobalVars->tickcount;
+	else if (I::GlobalVars->tickcount - m_iStateStartTime > 132)
+	{
+		m_eJumpState = STATE_AWAITING_JUMP;
+		m_iStateStartTime = 0;
+	}
+
+	if (m_eLastState != m_eJumpState)
+	{
+		m_iStateStartTime = I::GlobalVars->tickcount;
+		m_eLastState = m_eJumpState;
 	}
 }

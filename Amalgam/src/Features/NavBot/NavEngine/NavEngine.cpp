@@ -755,48 +755,57 @@ static std::vector<Crumb_t> RunSSFA(
 		CNavArea* pNewArea      = (i < n) ? vPortals[i].pArea  : vPortals[n - 1].pArea;
 		const NavPortal_t* pNewPortal = (i < n) ? &vPortals[i] : nullptr;
 
-		// Dynamic funnel shrinking for the next immediate portals
-		// This ensures we have 24 unit clearance from wall corners based on our approach angle
-		if (i < n && i <= iApexIdx + 2 && pNewPortal)
+		// Dynamic funnel shrinking: AABB clearance based on approach angle from apex to portal.
+		// An axis-aligned 24-unit box needs clearance = 24 * (|cos θ| + |sin θ|) where θ is
+		// the angle between the approach direction and the portal normal.
+		// Only shrink sides that are actually adjacent to a wall corner.
+		if (i < n && pNewPortal && !pNewPortal->bForced)
 		{
-			Vector vPortalDir = vNewRight - vNewLeft;
-			float flPortalWidth = vPortalDir.Length2D();
-			if (flPortalWidth > 1.f)
+			const bool bLeftIsWall  = pNewPortal->bLeftIsWall;
+			const bool bRightIsWall = pNewPortal->bRightIsWall;
+
+			if (bLeftIsWall || bRightIsWall)
 			{
-				vPortalDir.x /= flPortalWidth;
-				vPortalDir.y /= flPortalWidth;
-				vPortalDir.z = 0.f;
+				Vector vPortalDir = vNewRight - vNewLeft;
+				const float flPortalWidth = vPortalDir.Length2D();
 
-				Vector vApproach = vNewLeft - vApex;
-				float flApproachLen = vApproach.Length2D();
-				if (flApproachLen > 1.f)
+				if (flPortalWidth > 1.f)
 				{
-					vApproach.x /= flApproachLen;
-					vApproach.y /= flApproachLen;
-					vApproach.z = 0.f;
+					vPortalDir.x /= flPortalWidth;
+					vPortalDir.y /= flPortalWidth;
+					vPortalDir.z = 0.f;
 
-					// Portal normal is perpendicular to portal direction
-					Vector vPortalNormal(-vPortalDir.y, vPortalDir.x, 0.f);
-					
-					// Angle between approach and portal normal
-					float flCosTheta = vApproach.Dot(vPortalNormal);
-					float flSinTheta = vApproach.Dot(vPortalDir);
-					
-					// Calculate required clearance (24 units box)
-					float flClearance = 24.f * (std::abs(flCosTheta) + std::abs(flSinTheta));
-					
-					// We only want to shrink a side if it's actually against a wall
-					bool bLeftIsWall = pNewPortal->bLeftIsWall;
-					bool bRightIsWall = pNewPortal->bRightIsWall;
-					
-					// Clamp clearance so we don't invert the portal, leave at least 1 unit width
-					float flMaxClearance = std::max(0.f, (flPortalWidth - 1.f) * (bLeftIsWall && bRightIsWall ? 0.5f : 1.f));
-					flClearance = std::min(flClearance, flMaxClearance);
+					// Approach from apex toward portal midpoint
+					const Vector vMid = (vNewLeft + vNewRight) * 0.5f;
+					Vector vApproach  = vMid - vApex;
+					const float flApproachLen = vApproach.Length2D();
 
-					if (flClearance > 0.f)
+					if (flApproachLen > 1.f)
 					{
-						if (bLeftIsWall)  vNewLeft  += (vPortalDir * flClearance);
-						if (bRightIsWall) vNewRight -= (vPortalDir * flClearance);
+						vApproach.x /= flApproachLen;
+						vApproach.y /= flApproachLen;
+						vApproach.z = 0.f;
+
+						// Portal normal points in the travel direction (perpendicular to portal edge)
+						const Vector vPortalNormal(-vPortalDir.y, vPortalDir.x, 0.f);
+
+						// AABB clearance formula: box half-size * (|cos θ| + |sin θ|)
+						const float flCosTheta = std::abs(vApproach.Dot(vPortalNormal));
+						const float flSinTheta = std::abs(vApproach.Dot(vPortalDir));
+						const float flClearance = 24.f * (flCosTheta + flSinTheta);
+
+						// Each wall side consumes clearance from its own half of the portal.
+						// Leave at least 1 unit total width after both sides are shrunk.
+						const int   iWallSides   = (bLeftIsWall ? 1 : 0) + (bRightIsWall ? 1 : 0);
+						const float flBudget     = std::max(0.f, flPortalWidth - 1.f);
+						const float flPerSide    = flBudget / iWallSides;
+						const float flActual     = std::min(flClearance, flPerSide);
+
+						if (flActual > 0.f)
+						{
+							if (bLeftIsWall)  vNewLeft  += vPortalDir * flActual;
+							if (bRightIsWall) vNewRight -= vPortalDir * flActual;
+						}
 					}
 				}
 			}

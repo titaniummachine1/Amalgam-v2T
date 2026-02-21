@@ -491,11 +491,32 @@ struct NavPortal_t
 static bool ComputePortal(CNavArea* pFrom, CNavArea* pTo, NavPortal_t& tOut)
 {
 	constexpr float kInset = 24.f;
+	constexpr float fTol   = 2.f;
 
 	const float minXA = pFrom->m_vNwCorner.x, maxXA = pFrom->m_vSeCorner.x;
 	const float minYA = pFrom->m_vNwCorner.y, maxYA = pFrom->m_vSeCorner.y;
 	const float minXB = pTo->m_vNwCorner.x,   maxXB = pTo->m_vSeCorner.x;
 	const float minYB = pTo->m_vNwCorner.y,   maxYB = pTo->m_vSeCorner.y;
+
+	// Per-endpoint check: inset only when the endpoint is at pFrom's own boundary
+	// AND no perpendicular neighbor covers the portal's edge coordinate.
+	auto isPortalWallCorner = [&](float endCoord, float pFromBound, int iPerp, float flEdge) -> bool
+	{
+		if (std::abs(endCoord - pFromBound) > fTol) return false;
+		const bool bPerpX = (iPerp == 0 || iPerp == 2);
+		for (const auto& pc : pFrom->m_vConnectionsDir[iPerp])
+		{
+			if (!pc.m_pArea) continue;
+			const CNavArea* pN = pc.m_pArea;
+			const float nMin = bPerpX ? pN->m_vNwCorner.x : pN->m_vNwCorner.y;
+			const float nMax = bPerpX ? pN->m_vSeCorner.x : pN->m_vSeCorner.y;
+			if (flEdge >= nMin - fTol && flEdge <= nMax + fTol) return false;
+		}
+		return true;
+	};
+	// iDir → [iPerpAtMin, iPerpAtMax]
+	static constexpr int kPerpMin[4] = { 3, 0, 3, 0 };
+	static constexpr int kPerpMax[4] = { 1, 2, 1, 2 };
 
 	for (int iDir = 0; iDir < 4; iDir++)
 	{
@@ -510,20 +531,18 @@ static bool ComputePortal(CNavArea* pFrom, CNavArea* pTo, NavPortal_t& tOut)
 		if (bAxisX) { oMin = std::max(minXA, minXB); oMax = std::min(maxXA, maxXB); }
 		else        { oMin = std::max(minYA, minYB); oMax = std::min(maxYA, maxYB); }
 
-		// Edge coordinate of the shared boundary on A
-		float flEdge;
-		if      (iDir == 0) flEdge = minYA;
-		else if (iDir == 1) flEdge = maxXA;
-		else if (iDir == 2) flEdge = maxYA;
-		else                flEdge = minXA;
+		const float flEdge = (iDir == 0) ? minYA : (iDir == 1) ? maxXA : (iDir == 2) ? maxYA : minXA;
+		const float pFromMin = bAxisX ? minXA : minYA;
+		const float pFromMax = bAxisX ? maxXA : maxYA;
 
-		const float flInsetMin = oMin + kInset;
-		const float flInsetMax = oMax - kInset;
+		const bool bInsetMin = isPortalWallCorner(oMin, pFromMin, kPerpMin[iDir], flEdge);
+		const bool bInsetMax = isPortalWallCorner(oMax, pFromMax, kPerpMax[iDir], flEdge);
+		const float flPMin = bInsetMin ? oMin + kInset : oMin;
+		const float flPMax = bInsetMax ? oMax - kInset : oMax;
 
 		tOut.pArea = pTo;
-		if (flInsetMax < flInsetMin)
+		if (flPMax < flPMin)
 		{
-			// Narrower than 48u: forced center
 			const float flMid = (oMin + oMax) * 0.5f;
 			tOut.bForced = true;
 			if (bAxisX) { tOut.vLeft = { flMid, flEdge, pFrom->GetZ(flMid, flEdge) }; }
@@ -536,23 +555,19 @@ static bool ComputePortal(CNavArea* pFrom, CNavArea* pTo, NavPortal_t& tOut)
 			Vector vP1, vP2;
 			if (bAxisX)
 			{
-				vP1 = { flInsetMin, flEdge, pFrom->GetZ(flInsetMin, flEdge) };
-				vP2 = { flInsetMax, flEdge, pFrom->GetZ(flInsetMax, flEdge) };
+				vP1 = { flPMin, flEdge, pFrom->GetZ(flPMin, flEdge) };
+				vP2 = { flPMax, flEdge, pFrom->GetZ(flPMax, flEdge) };
 			}
 			else
 			{
-				vP1 = { flEdge, flInsetMin, pFrom->GetZ(flEdge, flInsetMin) };
-				vP2 = { flEdge, flInsetMax, pFrom->GetZ(flEdge, flInsetMax) };
+				vP1 = { flEdge, flPMin, pFrom->GetZ(flEdge, flPMin) };
+				vP2 = { flEdge, flPMax, pFrom->GetZ(flEdge, flPMax) };
 			}
-			// Orient left/right relative to travel direction from pFrom to pTo.
-			// Right-perpendicular in XY: (-dy, dx). Higher right-projection = more to the right.
-			{
-				const Vector vTravel = pTo->m_vCenter - pFrom->m_vCenter;
-				const float fD1 = vP1.x * (-vTravel.y) + vP1.y * vTravel.x;
-				const float fD2 = vP2.x * (-vTravel.y) + vP2.y * vTravel.x;
-				if (fD1 <= fD2) { tOut.vLeft = vP1; tOut.vRight = vP2; }
-				else             { tOut.vLeft = vP2; tOut.vRight = vP1; }
-			}
+			const Vector vTravel = pTo->m_vCenter - pFrom->m_vCenter;
+			const float fD1 = vP1.x * (-vTravel.y) + vP1.y * vTravel.x;
+			const float fD2 = vP2.x * (-vTravel.y) + vP2.y * vTravel.x;
+			if (fD1 <= fD2) { tOut.vLeft = vP1; tOut.vRight = vP2; }
+			else             { tOut.vLeft = vP2; tOut.vRight = vP1; }
 		}
 		return true;
 	}
@@ -950,8 +965,33 @@ bool CNavEngine::NavTo(const Vector& vDestination, PriorityListEnum::PriorityLis
 	}
 	else
 	{
-		// Theta* already produces any-angle paths; march each segment directly.
+			// Emit subdivided crumbs along A→B without any hull traces.
 		constexpr float kSubdivideSpacing = 160.f;
+		auto EmitSubdivided = [&](const Vector& vA, const Vector& vB, CNavArea* pArea)
+		{
+			const float flDist2D = Vector(vB.x - vA.x, vB.y - vA.y, 0.f).Length();
+			if (flDist2D > kSubdivideSpacing)
+			{
+				const int nSteps = static_cast<int>(flDist2D / kSubdivideSpacing);
+				const Vector vDelta = vB - vA;
+				for (int s = 1; s < nSteps; s++)
+				{
+					const float t = static_cast<float>(s) / static_cast<float>(nSteps);
+					Crumb_t tMid{};
+					tMid.m_vPos     = vA + vDelta * t;
+					tMid.m_pNavArea = pArea;
+					if (pArea) tMid.m_vPos.z = pArea->GetZ(tMid.m_vPos.x, tMid.m_vPos.y);
+					if (m_vCrumbs.empty() || m_vCrumbs.back().m_vPos.DistToSqr(tMid.m_vPos) >= 1.f)
+						m_vCrumbs.push_back(tMid);
+				}
+			}
+			Crumb_t tB{};
+			tB.m_vPos     = vB;
+			tB.m_pNavArea = pArea;
+			if (m_vCrumbs.empty() || m_vCrumbs.back().m_vPos.DistToSqr(tB.m_vPos) >= 1.f)
+				m_vCrumbs.push_back(tB);
+		};
+
 		Vector    vPrev     = reinterpret_cast<CNavArea*>(vPath.front())->m_vCenter;
 		CNavArea* pPrevArea = reinterpret_cast<CNavArea*>(vPath.front());
 		if (auto pLP = H::Entities.GetLocal(); pLP && pLP->IsAlive())
@@ -963,34 +1003,29 @@ bool CNavEngine::NavTo(const Vector& vDestination, PriorityListEnum::PriorityLis
 			if (!pNextArea) continue;
 
 			// Check for drop on directly-connected pairs
-			if (m_pMap->HasDirectConnection(pPrevArea, pNextArea))
+			const bool     bIsOneWay = m_pMap->IsOneWay(pPrevArea, pNextArea);
+			NavPoints_t    tPoints   = m_pMap->DeterminePoints(pPrevArea, pNextArea, bIsOneWay);
+			DropdownHint_t tDrop     = m_pMap->HandleDropdown(tPoints.m_vCenter, tPoints.m_vNext, bIsOneWay);
+			if (tDrop.m_bRequiresDrop)
 			{
-				const bool     bIsOneWay = m_pMap->IsOneWay(pPrevArea, pNextArea);
-				NavPoints_t    tPoints   = m_pMap->DeterminePoints(pPrevArea, pNextArea, bIsOneWay);
-				DropdownHint_t tDrop     = m_pMap->HandleDropdown(tPoints.m_vCenter, tPoints.m_vNext, bIsOneWay);
-				if (tDrop.m_bRequiresDrop)
-				{
-					NavMarchSegment(pLocalPlayer, m_pMap.get(), vPrev, tDrop.m_vAdjustedPos, pPrevArea,
-						true, &m_vCrumbs, kSubdivideSpacing);
-					Crumb_t tDrp{};
-					tDrp.m_vPos               = tDrop.m_vAdjustedPos;
-					tDrp.m_pNavArea           = pPrevArea;
-					tDrp.m_bRequiresDrop      = true;
-					tDrp.m_flDropHeight       = tDrop.m_flDropHeight;
-					tDrp.m_flApproachDistance = tDrop.m_flApproachDistance;
-					tDrp.m_vApproachDir       = tDrop.m_vApproachDir;
-					if (m_vCrumbs.empty() || m_vCrumbs.back().m_vPos.DistToSqr(tDrp.m_vPos) >= 1.f)
-						m_vCrumbs.push_back(tDrp);
-					vPrev     = tDrop.m_vAdjustedPos;
-					pPrevArea = pNextArea;
-					continue;
-				}
+				EmitSubdivided(vPrev, tDrop.m_vAdjustedPos, pPrevArea);
+				Crumb_t tDrp{};
+				tDrp.m_vPos               = tDrop.m_vAdjustedPos;
+				tDrp.m_pNavArea           = pPrevArea;
+				tDrp.m_bRequiresDrop      = true;
+				tDrp.m_flDropHeight       = tDrop.m_flDropHeight;
+				tDrp.m_flApproachDistance = tDrop.m_flApproachDistance;
+				tDrp.m_vApproachDir       = tDrop.m_vApproachDir;
+				if (m_vCrumbs.empty() || m_vCrumbs.back().m_vPos.DistToSqr(tDrp.m_vPos) >= 1.f)
+					m_vCrumbs.push_back(tDrp);
+				vPrev     = tDrop.m_vAdjustedPos;
+				pPrevArea = pNextArea;
+				continue;
 			}
 
 			Vector vNext = pNextArea->m_vCenter;
 			vNext.z = pNextArea->GetZ(vNext.x, vNext.y);
-			NavMarchSegment(pLocalPlayer, m_pMap.get(), vPrev, vNext, pPrevArea,
-				true, &m_vCrumbs, kSubdivideSpacing);
+			EmitSubdivided(vPrev, vNext, pNextArea);
 			vPrev     = vNext;
 			pPrevArea = pNextArea;
 		}
@@ -1200,6 +1235,7 @@ static bool NavMarchSegment(
 
 void CNavEngine::VischeckPath()
 {
+	return; // path is built from navmesh topology — no runtime hull-trace validation
 	static Timer tVischeckTimer{};
 	if (m_vCrumbs.size() < 2 || !tVischeckTimer.Run(Vars::Misc::Movement::NavEngine::VischeckTime.Value))
 		return;
@@ -2367,63 +2403,136 @@ void CNavEngine::Render()
 				H::Draw.RenderLine(vSw, vNw, cOutline, false);
 			}
 
-			// isCovered: does any neighbor in iDir have its axis range covering coord?
-			// Dir 0=North(X axis), 1=East(Y axis), 2=South(X axis), 3=West(Y axis)
-			constexpr float fTol = 2.f;
-			auto isCovered = [&](int iDir, float coord) -> bool
+			// Wall corner detection: proximity-score approach matching WallCornerGenerator.lua
+			// Dir 0=North(min-Y, X-axis), 1=East(max-X, Y-axis), 2=South(max-Y, X-axis), 3=West(min-X, Y-axis)
+			// Corner→adjacent dirs: NW→(0,3), NE→(0,1), SW→(2,3), SE→(2,1)
+			if (bDrawWallCorners)
 			{
-				const bool bAxisX = (iDir == 0 || iDir == 2);
-				for (const auto& conn : pArea->m_vConnectionsDir[iDir])
+				constexpr float fTol = 2.f;
+
+				// Score: 1.0 = strictly within, 0.99 = at edge, 0.0 = outside
+				auto axisScore = [&](float coord, float bMin, float bMax) -> float
 				{
-					if (!conn.m_pArea) continue;
-					const CNavArea* pB = conn.m_pArea;
-					const float bMin = bAxisX ? pB->m_vNwCorner.x : pB->m_vNwCorner.y;
-					const float bMax = bAxisX ? pB->m_vSeCorner.x : pB->m_vSeCorner.y;
-					if (coord >= bMin - fTol && coord <= bMax + fTol)
-						return true;
-				}
-				return false;
-			};
-			// isCornerCovered2D: true if any neighbor's 2D XY box contains the corner point.
-			// Catches convex corners where both adjacent axis-neighbors cover their axis
-			// but no single area covers the 2D corner (the diagonal gap case).
-			auto isCornerCovered2D = [&](const Vector& vCorner) -> bool
-			{
-				for (int iDir = 0; iDir < 4; iDir++)
+					if (coord < bMin - fTol || coord > bMax + fTol) return 0.f;
+					if ((coord - bMin) < fTol || (bMax - coord) < fTol) return 0.99f;
+					return 1.0f;
+				};
+
+				// Best score from any neighbor in iDir for this corner's axis coordinate
+				// Also returns the best contributing neighbor via pBestOut
+				auto dirScore = [&](int iDir, const Vector& vCorner, const CNavArea*& pBestOut) -> float
 				{
+					const bool bAxisX = (iDir == 0 || iDir == 2);
+					float best = 0.f;
+					pBestOut = nullptr;
 					for (const auto& conn : pArea->m_vConnectionsDir[iDir])
 					{
 						if (!conn.m_pArea) continue;
 						const CNavArea* pB = conn.m_pArea;
-						if (vCorner.x >= pB->m_vNwCorner.x - fTol && vCorner.x <= pB->m_vSeCorner.x + fTol &&
-							vCorner.y >= pB->m_vNwCorner.y - fTol && vCorner.y <= pB->m_vSeCorner.y + fTol)
-							return true;
+						const float bMin = bAxisX ? pB->m_vNwCorner.x : pB->m_vNwCorner.y;
+						const float bMax = bAxisX ? pB->m_vSeCorner.x : pB->m_vSeCorner.y;
+						const float coord = bAxisX ? vCorner.x : vCorner.y;
+						const float s = axisScore(coord, bMin, bMax);
+						if (s > best) { best = s; pBestOut = pB; }
 					}
-				}
-				return false;
-			};
+					return best;
+				};
 
-			// Wall corners: small square at every corner not covered by any neighbour
-			if (bDrawWallCorners)
-			{
+				// Diagonal check: does any connection of pNeighbor1 contain the corner
+				// on either of the two adjacent axis directions?
+				auto hasDiagonalCover = [&](const CNavArea* pNeighbor1, int iDir1, int iDir2, const Vector& vCorner) -> bool
+				{
+					if (!pNeighbor1) return false;
+					const bool bX1 = (iDir1 == 0 || iDir1 == 2);
+					const bool bX2 = (iDir2 == 0 || iDir2 == 2);
+					for (int d = 0; d < 4; d++)
+					{
+						for (const auto& diagConn : pNeighbor1->m_vConnectionsDir[d])
+						{
+							const CNavArea* pD = diagConn.m_pArea;
+							if (!pD || pD == pArea) continue;
+							const float s1 = axisScore(bX1 ? vCorner.x : vCorner.y,
+								bX1 ? pD->m_vNwCorner.x : pD->m_vNwCorner.y,
+								bX1 ? pD->m_vSeCorner.x : pD->m_vSeCorner.y);
+							const float s2 = axisScore(bX2 ? vCorner.x : vCorner.y,
+								bX2 ? pD->m_vNwCorner.x : pD->m_vNwCorner.y,
+								bX2 ? pD->m_vSeCorner.x : pD->m_vSeCorner.y);
+							if (s1 > 0.f || s2 > 0.f) return true;
+						}
+					}
+					return false;
+				};
+
+				auto isWallCorner = [&](const Vector& vCorner, int iDir1, int iDir2) -> bool
+				{
+					// Fast path: no neighbors on either adjacent side → exposed corner
+					if (pArea->m_vConnectionsDir[iDir1].empty()) return true;
+					if (pArea->m_vConnectionsDir[iDir2].empty()) return true;
+
+					const CNavArea* pN1 = nullptr;
+					const CNavArea* pN2 = nullptr;
+					const float s1 = dirScore(iDir1, vCorner, pN1);
+					const float s2 = dirScore(iDir2, vCorner, pN2);
+					const float total = s1 + s2;
+
+					if (total >= 1.985f) return false;          // 2.0 or 1.99 → surrounded
+					if (total > 1.975f)                         // ≈1.98 → concave, need diagonal
+						return !hasDiagonalCover(pN1, iDir1, iDir2, vCorner);
+					return true;                                 // < 1.98 → wall corner
+				};
+
 				constexpr float hs = 6.f;
 				auto DrawCornerSq = [&](const Vector& v)
 				{
 					const Vector vBase{ v.x, v.y, v.z + 1.f };
 					H::Draw.RenderBox(vBase, Vector(-hs, -hs, -1.f), Vector(hs, hs, 1.f), Vector(), cWallCorner, false);
 				};
-				if (!isCornerCovered2D(vNw)) DrawCornerSq(vNw);
-				if (!isCornerCovered2D(vNe)) DrawCornerSq(vNe);
-				if (!isCornerCovered2D(vSw)) DrawCornerSq(vSw);
-				if (!isCornerCovered2D(vSe)) DrawCornerSq(vSe);
+
+				// NW=(0,3) NE=(0,1) SW=(2,3) SE=(2,1)
+				if (isWallCorner(vNw, 0, 3)) DrawCornerSq(vNw);
+				if (isWallCorner(vNe, 0, 1)) DrawCornerSq(vNe);
+				if (isWallCorner(vSw, 2, 3)) DrawCornerSq(vSw);
+				if (isWallCorner(vSe, 2, 1)) DrawCornerSq(vSe);
 			}
-			// Draw portals (shared X/Y overlap on A's edge, inset 24u from each end, Z interpolated)
+			// Draw portals (shared X/Y overlap on A's edge, inset 24u only at wall-corner endpoints)
 			if (bDrawPortals && cPortal.a)
 			{
 				constexpr float kPortalInset = 24.f;
+				constexpr float fPTol = 2.f;
+				// Per-endpoint wall-corner check:
+				// Only inset if the endpoint is at pArea's own boundary AND no perpendicular
+				// neighbor covers the portal's edge coordinate (= the non-varying axis value).
+				// iPerp: direction perpendicular to the portal at this endpoint.
+				// flEdge: the fixed coordinate of the portal boundary (e.g. minY for North).
+				auto isPortalWallCorner = [&](float endCoord, float pAreaBound, int iPerp, float flEdge) -> bool
+				{
+					if (std::abs(endCoord - pAreaBound) > fPTol) return false; // endpoint from pB, not pArea's corner
+					const bool bPerpX = (iPerp == 0 || iPerp == 2);
+					for (const auto& pc : pArea->m_vConnectionsDir[iPerp])
+					{
+						if (!pc.m_pArea) continue;
+						const CNavArea* pN = pc.m_pArea;
+						const float nMin = bPerpX ? pN->m_vNwCorner.x : pN->m_vNwCorner.y;
+						const float nMax = bPerpX ? pN->m_vSeCorner.x : pN->m_vSeCorner.y;
+						if (flEdge >= nMin - fPTol && flEdge <= nMax + fPTol) return false;
+					}
+					return true;
+				};
+				// Perpendicular dirs and pArea bounds per portal direction:
+				//   iDir=0 (N, edge=minY, axisX): oMin→dir3(W),pAreaBound=minX  oMax→dir1(E),pAreaBound=maxX
+				//   iDir=1 (E, edge=maxX, axisY): oMin→dir0(N),pAreaBound=minY  oMax→dir2(S),pAreaBound=maxY
+				//   iDir=2 (S, edge=maxY, axisX): oMin→dir3(W),pAreaBound=minX  oMax→dir1(E),pAreaBound=maxX
+				//   iDir=3 (W, edge=minX, axisY): oMin→dir0(N),pAreaBound=minY  oMax→dir2(S),pAreaBound=maxY
+				static constexpr int kPerpMin[4] = { 3, 0, 3, 0 };
+				static constexpr int kPerpMax[4] = { 1, 2, 1, 2 };
 				for (int iDir = 0; iDir < 4; iDir++)
 				{
 					const bool bAxisX = (iDir == 0 || iDir == 2);
+					// Edge coordinate (non-varying axis of this portal boundary)
+					const float flEdge = (iDir == 0) ? minY : (iDir == 1) ? maxX : (iDir == 2) ? maxY : minX;
+					// pArea's own boundary extents on the portal axis
+					const float pAreaMin = bAxisX ? minX : minY;
+					const float pAreaMax = bAxisX ? maxX : maxY;
 					for (const auto& conn : pArea->m_vConnectionsDir[iDir])
 					{
 						if (!conn.m_pArea) continue;
@@ -2433,36 +2542,39 @@ void CNavEngine::Render()
 						else        { oMin = std::max(minY, pB->m_vNwCorner.y); oMax = std::min(maxY, pB->m_vSeCorner.y); }
 						if (oMax <= oMin) continue;
 
-						const float flInsetMin = oMin + kPortalInset;
-						const float flInsetMax = oMax - kPortalInset;
-						const bool bForced = flInsetMax < flInsetMin;
-						const float fA = bForced ? (oMin + oMax) * 0.5f : flInsetMin;
-						const float fB2 = bForced ? fA : flInsetMax;
+						const bool bInsetMin = isPortalWallCorner(oMin, pAreaMin, kPerpMin[iDir], flEdge);
+						const bool bInsetMax = isPortalWallCorner(oMax, pAreaMax, kPerpMax[iDir], flEdge);
+						const float fA  = bInsetMin ? oMin + kPortalInset : oMin;
+						const float fB2 = bInsetMax ? oMax - kPortalInset : oMax;
+						const bool bForced = fB2 < fA;
 
+						// N/E portals sit 2 units higher than S/W portals so bidirectional
+						// portals at the same physical boundary render at different heights.
+						const float flZBias = (iDir < 2) ? 4.f : 2.f;
 						Vector vP0, vP1;
 						if (iDir == 0)
 						{
 							float t0 = dX > 0 ? (fA  - minX) / dX : 0.f, t1 = dX > 0 ? (fB2 - minX) / dX : 0.f;
-							vP0 = { fA,  minY, zNW + t0 * (zNE - zNW) + 2.f };
-							vP1 = { fB2, minY, zNW + t1 * (zNE - zNW) + 2.f };
+							vP0 = { fA,  minY, zNW + t0 * (zNE - zNW) + flZBias };
+							vP1 = { fB2, minY, zNW + t1 * (zNE - zNW) + flZBias };
 						}
 						else if (iDir == 1)
 						{
 							float t0 = dY > 0 ? (fA  - minY) / dY : 0.f, t1 = dY > 0 ? (fB2 - minY) / dY : 0.f;
-							vP0 = { maxX, fA,  zNE + t0 * (zSE - zNE) + 2.f };
-							vP1 = { maxX, fB2, zNE + t1 * (zSE - zNE) + 2.f };
+							vP0 = { maxX, fA,  zNE + t0 * (zSE - zNE) + flZBias };
+							vP1 = { maxX, fB2, zNE + t1 * (zSE - zNE) + flZBias };
 						}
 						else if (iDir == 2)
 						{
 							float t0 = dX > 0 ? (fA  - minX) / dX : 0.f, t1 = dX > 0 ? (fB2 - minX) / dX : 0.f;
-							vP0 = { fA,  maxY, zSW + t0 * (zSE - zSW) + 2.f };
-							vP1 = { fB2, maxY, zSW + t1 * (zSE - zSW) + 2.f };
+							vP0 = { fA,  maxY, zSW + t0 * (zSE - zSW) + flZBias };
+							vP1 = { fB2, maxY, zSW + t1 * (zSE - zSW) + flZBias };
 						}
 						else
 						{
 							float t0 = dY > 0 ? (fA  - minY) / dY : 0.f, t1 = dY > 0 ? (fB2 - minY) / dY : 0.f;
-							vP0 = { minX, fA,  zNW + t0 * (zSW - zNW) + 2.f };
-							vP1 = { minX, fB2, zNW + t1 * (zSW - zNW) + 2.f };
+							vP0 = { minX, fA,  zNW + t0 * (zSW - zNW) + flZBias };
+							vP1 = { minX, fB2, zNW + t1 * (zSW - zNW) + flZBias };
 						}
 						if (bForced)
 						{

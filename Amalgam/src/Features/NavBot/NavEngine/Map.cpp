@@ -5,15 +5,16 @@
 #include <queue>
 #include <algorithm>
 
-// Navmesh-only LOS for Theta*: no hull traces, pure topology check.
-// Marches from pFrom's center toward pTo's center following navmesh connections.
+// Topology LOS for Theta*: marches the fixed A→B ray through connected nav areas.
+// posX/posY always stay on the original ray — no clamping to neighbor bounds,
+// which would drift the direction and mis-identify which neighbor to enter next.
 static bool NavMeshLOS(CMap* pMap, CNavArea* pFrom, CNavArea* pTo)
 {
 	if (!pFrom || !pTo) return false;
 	if (pFrom == pTo)   return true;
 
-	constexpr int   kMaxSteps = 64;
-	constexpr float kTol      = 16.f;
+	constexpr int   kMaxSteps = 128;
+	constexpr float kTol      = 24.f;   // tolerance for misaligned area edges
 	constexpr float kMaxFall  = 250.f;
 	constexpr float kMaxJump  = 72.f;
 
@@ -40,6 +41,7 @@ static bool NavMeshLOS(CMap* pMap, CNavArea* pFrom, CNavArea* pTo)
 		const float minX = pCur->m_vNwCorner.x, maxX = pCur->m_vSeCorner.x;
 		const float minY = pCur->m_vNwCorner.y, maxY = pCur->m_vSeCorner.y;
 
+		// Ray–AABB exit: find t at which the fixed A→B ray leaves this area
 		float tExit = FLT_MAX;
 		if      (vDir.x > 0.f)  tExit = std::min(tExit, (maxX - posX) / vDir.x);
 		else if (vDir.x < 0.f)  tExit = std::min(tExit, (minX - posX) / vDir.x);
@@ -48,10 +50,12 @@ static bool NavMeshLOS(CMap* pMap, CNavArea* pFrom, CNavArea* pTo)
 
 		if (tExit <= 0.f || tExit == FLT_MAX) return false;
 
+		// Exit point stays exactly on the original ray — no clamping
 		const float eX    = posX + vDir.x * tExit;
 		const float eY    = posY + vDir.y * tExit;
 		const float eCurZ = pCur->GetZ(eX, eY);
 
+		// Find connected neighbor that best contains the exit point
 		CNavArea* pNext   = nullptr;
 		float     flBestD = FLT_MAX;
 		for (int d = 0; d < 4; d++)
@@ -70,8 +74,9 @@ static bool NavMeshLOS(CMap* pMap, CNavArea* pFrom, CNavArea* pTo)
 		}
 
 		if (!pNext) return false;
-		posX = std::clamp(eX, pNext->m_vNwCorner.x, pNext->m_vSeCorner.x);
-		posY = std::clamp(eY, pNext->m_vNwCorner.y, pNext->m_vSeCorner.y);
+		// Advance position along the original ray — NOT clamped to pNext's bounds
+		posX = eX;
+		posY = eY;
 		pCur = pNext;
 	}
 
@@ -158,30 +163,10 @@ int CMap::Solve(CNavArea* pStart, CNavArea* pEnd, std::vector<void*>* path, floa
 				nextNode.m_f = std::numeric_limits<float>::max();
 				nextNode.m_pParent = nullptr;
 				nextNode.m_iQueryId = m_iQueryId;
-				nextNode.m_bInOpen = false;
 			}
 
-			// Theta*: try routing through grandparent (any-angle shortcut)
-			float   flNewG     = currentNode.m_g + flCostToNext;
+			float     flNewG     = currentNode.m_g + flCostToNext;
 			CNavArea* pNewParent = pCurrentArea;
-			CNavArea* pParent    = currentNode.m_pParent;
-			if (pParent)
-			{
-				const size_t uParentIdx = static_cast<size_t>(pParent - &m_navfile.m_vAreas[0]);
-				if (uParentIdx < m_vPathNodes.size())
-				{
-					PathNode_t& parentNode = m_vPathNodes[uParentIdx];
-					if (parentNode.m_iQueryId == m_iQueryId)
-					{
-						const float flViaParent = parentNode.m_g + pParent->m_vCenter.DistTo(pNextArea->m_vCenter);
-						if (flViaParent < flNewG && NavMeshLOS(this, pParent, pNextArea))
-						{
-							flNewG     = flViaParent;
-							pNewParent = pParent;
-						}
-					}
-				}
-			}
 
 			if (flNewG < nextNode.m_g)
 			{

@@ -145,14 +145,14 @@ void CCore::Load()
 	if (m_bUnload = m_bFailed = !U::Signatures.Initialize() || !U::Interfaces.Initialize() || !CheckDXLevel())
 		return;
 
-	if (m_bUnload = m_bFailed2 = !U::Hooks.Initialize() || !U::BytePatches.Initialize() || !H::Events.Initialize())
-		return;
-
 #ifndef TEXTMODE
 	F::Materials.LoadMaterials();
 #endif
-	H::ConVars.Unlock();
 
+	if (m_bUnload = m_bFailed2 = !U::Hooks.Initialize() || !U::BytePatches.Initialize() || !H::Events.Initialize())
+		return;
+
+	H::ConVars.Unlock();
 
 	F::Configs.LoadConfig(F::Configs.m_sCurrentConfig, false);
 	I::EngineClient->ClientCmd_Unrestricted("exec catexec");

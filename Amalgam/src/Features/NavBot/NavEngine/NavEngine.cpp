@@ -477,7 +477,7 @@ struct NavPortal_t
 {
 	Vector    vLeft{};
 	Vector    vRight{};
-	bool      bForced{};        // width < 48u → must walk center
+	bool      bForced{};        // must walk center (wall boundary or narrow choke)
 	bool      bLeftIsWall{};
 	bool      bRightIsWall{};
 	bool      bDrop{};
@@ -485,6 +485,8 @@ struct NavPortal_t
 	float     flApproachDist{};
 	Vector    vApproachDir{};
 	CNavArea* pArea{};
+	CNavArea* pFromArea{};      // area this portal exits from
+	int       iDir{ -1 };      // nav direction (0=N,1=E,2=S,3=W) of this boundary
 };
 
 // Compute the inset portal for a connection A→B.
@@ -648,8 +650,10 @@ static bool ComputePortal(CNavArea* pFrom, CNavArea* pTo, NavPortal_t& tOut)
 		const float trimMin = oMin + tMin * (oMax - oMin);
 		const float trimMax = oMin + tMax * (oMax - oMin);
 
-		tOut.pArea    = pTo;
-		tOut.bForced  = false;
+		tOut.pArea     = pTo;
+		tOut.pFromArea = pFrom;
+		tOut.iDir      = iDir;
+		tOut.bForced   = false;
 
 		Vector vP1, vP2;
 		bool bP1IsWall = false, bP2IsWall = false;
@@ -682,6 +686,17 @@ static bool ComputePortal(CNavArea* pFrom, CNavArea* pTo, NavPortal_t& tOut)
 			tOut.vLeft = vP2; tOut.vRight = vP1;
 			tOut.bLeftIsWall = bP2IsWall; tOut.bRightIsWall = bP1IsWall;
 		}
+
+		// Both endpoints are wall corners → this boundary is a wall (door/choke).
+		// SSFA must not cut through it; force the center as a mandatory waypoint.
+		if (tOut.bLeftIsWall && tOut.bRightIsWall)
+		{
+			const Vector vCenter = (tOut.vLeft + tOut.vRight) * 0.5f;
+			tOut.vLeft   = vCenter;
+			tOut.vRight  = vCenter;
+			tOut.bForced = true;
+		}
+
 		return true;
 	}
 	return false;
@@ -1143,6 +1158,8 @@ bool CNavEngine::NavTo(const Vector& vDestination, PriorityListEnum::PriorityLis
 			{
 				NavPortal_t tPort{};
 				tPort.pArea          = pNextArea;
+				tPort.pFromArea      = pPrevArea;
+				tPort.iDir           = -1;
 				tPort.vLeft          = tDrop.m_vAdjustedPos;
 				tPort.vRight         = tDrop.m_vAdjustedPos;
 				tPort.bForced        = true;
@@ -1156,7 +1173,28 @@ bool CNavEngine::NavTo(const Vector& vDestination, PriorityListEnum::PriorityLis
 			{
 				NavPortal_t tPort{};
 				if (ComputePortal(pPrevArea, pNextArea, tPort))
+				{
+					// Consecutive portals that both cross the same direction boundary of the
+					// same from-area are geometrically impossible without passing through the
+					// area center first (e.g. enter North, exit North again).
+					// Insert a forced center waypoint to prevent SSFA from shortcutting.
+					if (!vPortals.empty() &&
+						!vPortals.back().bDrop &&
+						vPortals.back().pFromArea == pPrevArea &&
+						vPortals.back().iDir == tPort.iDir &&
+						tPort.iDir >= 0)
+					{
+						NavPortal_t tCenter{};
+						tCenter.pArea     = pPrevArea;
+						tCenter.pFromArea = pPrevArea;
+						tCenter.iDir      = -1;
+						tCenter.vLeft     = pPrevArea->m_vCenter;
+						tCenter.vRight    = pPrevArea->m_vCenter;
+						tCenter.bForced   = true;
+						vPortals.push_back(tCenter);
+					}
 					vPortals.push_back(tPort);
+				}
 			}
 
 			pPrevArea = pNextArea;

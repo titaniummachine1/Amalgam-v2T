@@ -511,6 +511,25 @@ static bool ComputePortal(CNavArea* pFrom, CNavArea* pTo, NavPortal_t& tOut)
 			const float nMin = bPerpX ? pN->m_vNwCorner.x : pN->m_vNwCorner.y;
 			const float nMax = bPerpX ? pN->m_vSeCorner.x : pN->m_vSeCorner.y;
 			if (flEdge >= nMin - fTol && flEdge <= nMax + fTol) return false;
+			
+			// Check diagonal neighbors of pN
+			for (int d = 0; d < 4; d++)
+			{
+				for (const auto& diagConn : pN->m_vConnectionsDir[d])
+				{
+					const CNavArea* pD = diagConn.m_pArea;
+					if (!pD || pD == pFrom) continue;
+					const float dMin = bPerpX ? pD->m_vNwCorner.x : pD->m_vNwCorner.y;
+					const float dMax = bPerpX ? pD->m_vSeCorner.x : pD->m_vSeCorner.y;
+					const float dEdgeMin = bPerpX ? pD->m_vNwCorner.y : pD->m_vNwCorner.x;
+					const float dEdgeMax = bPerpX ? pD->m_vSeCorner.y : pD->m_vSeCorner.x;
+					
+					// If the diagonal neighbor touches the edge coordinate and overlaps the endpoint
+					if (flEdge >= dMin - fTol && flEdge <= dMax + fTol &&
+						endCoord >= dEdgeMin - fTol && endCoord <= dEdgeMax + fTol)
+						return false;
+				}
+			}
 		}
 		return true;
 	};
@@ -537,11 +556,11 @@ static bool ComputePortal(CNavArea* pFrom, CNavArea* pTo, NavPortal_t& tOut)
 
 		const bool bInsetMin = isPortalWallCorner(oMin, pFromMin, kPerpMin[iDir], flEdge);
 		const bool bInsetMax = isPortalWallCorner(oMax, pFromMax, kPerpMax[iDir], flEdge);
-		const float flPMin = bInsetMin ? oMin + kInset : oMin;
-		const float flPMax = bInsetMax ? oMax - kInset : oMax;
-
+		
 		tOut.pArea = pTo;
-		if (flPMax < flPMin)
+		
+		// If the shared overlap is too small, don't inset at all and force center
+		if (oMax - oMin <= kInset)
 		{
 			const float flMid = (oMin + oMax) * 0.5f;
 			tOut.bForced = true;
@@ -551,23 +570,38 @@ static bool ComputePortal(CNavArea* pFrom, CNavArea* pTo, NavPortal_t& tOut)
 		}
 		else
 		{
-			tOut.bForced = false;
-			Vector vP1, vP2;
-			if (bAxisX)
+			const float flPMin = bInsetMin ? oMin + kInset : oMin;
+			const float flPMax = bInsetMax ? oMax - kInset : oMax;
+			
+			// If insetting would flip the portal, force center
+			if (flPMax < flPMin)
 			{
-				vP1 = { flPMin, flEdge, pFrom->GetZ(flPMin, flEdge) };
-				vP2 = { flPMax, flEdge, pFrom->GetZ(flPMax, flEdge) };
+				const float flMid = (oMin + oMax) * 0.5f;
+				tOut.bForced = true;
+				if (bAxisX) { tOut.vLeft = { flMid, flEdge, pFrom->GetZ(flMid, flEdge) }; }
+				else        { tOut.vLeft = { flEdge, flMid, pFrom->GetZ(flEdge, flMid) }; }
+				tOut.vRight = tOut.vLeft;
 			}
 			else
 			{
-				vP1 = { flEdge, flPMin, pFrom->GetZ(flEdge, flPMin) };
-				vP2 = { flEdge, flPMax, pFrom->GetZ(flEdge, flPMax) };
+				tOut.bForced = false;
+				Vector vP1, vP2;
+				if (bAxisX)
+				{
+					vP1 = { flPMin, flEdge, pFrom->GetZ(flPMin, flEdge) };
+					vP2 = { flPMax, flEdge, pFrom->GetZ(flPMax, flEdge) };
+				}
+				else
+				{
+					vP1 = { flEdge, flPMin, pFrom->GetZ(flEdge, flPMin) };
+					vP2 = { flEdge, flPMax, pFrom->GetZ(flEdge, flPMax) };
+				}
+				const Vector vTravel = pTo->m_vCenter - pFrom->m_vCenter;
+				const float fD1 = vP1.x * (-vTravel.y) + vP1.y * vTravel.x;
+				const float fD2 = vP2.x * (-vTravel.y) + vP2.y * vTravel.x;
+				if (fD1 <= fD2) { tOut.vLeft = vP1; tOut.vRight = vP2; }
+				else             { tOut.vLeft = vP2; tOut.vRight = vP1; }
 			}
-			const Vector vTravel = pTo->m_vCenter - pFrom->m_vCenter;
-			const float fD1 = vP1.x * (-vTravel.y) + vP1.y * vTravel.x;
-			const float fD2 = vP2.x * (-vTravel.y) + vP2.y * vTravel.x;
-			if (fD1 <= fD2) { tOut.vLeft = vP1; tOut.vRight = vP2; }
-			else             { tOut.vLeft = vP2; tOut.vRight = vP1; }
 		}
 		return true;
 	}
@@ -2492,6 +2526,25 @@ void CNavEngine::Render()
 						const float nMin = bPerpX ? pN->m_vNwCorner.x : pN->m_vNwCorner.y;
 						const float nMax = bPerpX ? pN->m_vSeCorner.x : pN->m_vSeCorner.y;
 						if (flEdge >= nMin - fPTol && flEdge <= nMax + fPTol) return false;
+						
+						// Check diagonal neighbors of pN
+						for (int d = 0; d < 4; d++)
+						{
+							for (const auto& diagConn : pN->m_vConnectionsDir[d])
+							{
+								const CNavArea* pD = diagConn.m_pArea;
+								if (!pD || pD == pArea) continue;
+								const float dMin = bPerpX ? pD->m_vNwCorner.x : pD->m_vNwCorner.y;
+								const float dMax = bPerpX ? pD->m_vSeCorner.x : pD->m_vSeCorner.y;
+								const float dEdgeMin = bPerpX ? pD->m_vNwCorner.y : pD->m_vNwCorner.x;
+								const float dEdgeMax = bPerpX ? pD->m_vSeCorner.y : pD->m_vSeCorner.x;
+								
+								// If the diagonal neighbor touches the edge coordinate and overlaps the endpoint
+								if (flEdge >= dMin - fPTol && flEdge <= dMax + fPTol &&
+									endCoord >= dEdgeMin - fPTol && endCoord <= dEdgeMax + fPTol)
+									return false;
+							}
+						}
 					}
 					return true;
 				};
@@ -2521,9 +2574,28 @@ void CNavEngine::Render()
 
 						const bool bInsetMin = isPortalWallCorner(oMin, pAreaMin, kPerpMin[iDir], flEdge);
 						const bool bInsetMax = isPortalWallCorner(oMax, pAreaMax, kPerpMax[iDir], flEdge);
-						const float fA  = bInsetMin ? oMin + kPortalInset : oMin;
-						const float fB2 = bInsetMax ? oMax - kPortalInset : oMax;
-						const bool bForced = fB2 < fA;
+						
+						bool bForced = false;
+						float fA = oMin;
+						float fB2 = oMax;
+						
+						if (oMax - oMin <= kPortalInset)
+						{
+							bForced = true;
+							fA = (oMin + oMax) * 0.5f;
+							fB2 = fA;
+						}
+						else
+						{
+							fA = bInsetMin ? oMin + kPortalInset : oMin;
+							fB2 = bInsetMax ? oMax - kPortalInset : oMax;
+							if (fB2 < fA)
+							{
+								bForced = true;
+								fA = (oMin + oMax) * 0.5f;
+								fB2 = fA;
+							}
+						}
 
 						// N/E portals sit 2 units higher than S/W portals so bidirectional
 						// portals at the same physical boundary render at different heights.

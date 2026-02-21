@@ -163,6 +163,7 @@ int CMap::Solve(CNavArea* pStart, CNavArea* pEnd, std::vector<void*>* path, floa
 				nextNode.m_f = std::numeric_limits<float>::max();
 				nextNode.m_pParent = nullptr;
 				nextNode.m_iQueryId = m_iQueryId;
+				nextNode.m_bInOpen = false;
 			}
 
 			float     flNewG     = currentNode.m_g + flCostToNext;

@@ -157,7 +157,7 @@ float CAntiAim::GetYawOffset(CTFPlayer* pEntity, bool bFake)
 	case Vars::AntiAim::YawEnum::Freestand:
 	{
 		if (F::Freestand.HasResult())
-			return F::Freestand.GetFreestandYaw();
+			return F::Freestand.GetYawOffset(I::EngineClient->GetViewAngles().y);
 		return 180.f;
 	}
 	}

@@ -1330,8 +1330,7 @@ void CMenu::MenuHvH(int iTab)
 					PushTransparent(Vars::AntiAim::YawReal.Value != Vars::AntiAim::YawEnum::Freestand && Vars::AntiAim::YawFake.Value != Vars::AntiAim::YawEnum::Freestand);
 					{
 						FToggle(Vars::AntiAim::FreestandVisuals, FToggleEnum::Left);
-						FToggle(Vars::AntiAim::FreestandAutoPitch, FToggleEnum::Right);
-						FSlider(Vars::AntiAim::FreestandSegments, FSliderEnum::Left);
+						FSlider(Vars::AntiAim::FreestandSegments, FSliderEnum::Right);
 					}
 					PopTransparent();
 				} EndSection();

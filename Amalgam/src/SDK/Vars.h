@@ -520,11 +520,11 @@ namespace Vars
 		CVar(Enabled, VA_LIST("Enabled", "Antiaim enabled"), false);
 		CVar(DisableOnSpectate, "Disable on spectate", false);
 		CVarEnum(PitchReal, "Real pitch", 0, NONE, nullptr,
-			VA_LIST("None", "Up", "Down", "Zero", "Jitter", "Reverse jitter", "Half up", "Half down", "Random", "Spin", "Ultra Random"),
-			None, Up, Down, Zero, Jitter, ReverseJitter, HalfUp, HalfDown, Random, Spin, UltraRandom);
+			VA_LIST("None", "Up", "Down", "Zero", "Jitter", "Reverse jitter", "Half up", "Half down", "Random", "Spin", "Ultra Random", "Auto"),
+			None, Up, Down, Zero, Jitter, ReverseJitter, HalfUp, HalfDown, Random, Spin, UltraRandom, Auto);
 		CVarEnum(PitchFake, "Fake pitch", 0, NONE, nullptr,
-			VA_LIST("None", "Up", "Down", "Jitter", "Reverse jitter", "Half up", "Half down", "Random", "Spin", "Ultra Random"),
-			None, Up, Down, Jitter, ReverseJitter, HalfUp, HalfDown, Random, Spin, UltraRandom);
+			VA_LIST("None", "Up", "Down", "Jitter", "Reverse jitter", "Half up", "Half down", "Random", "Spin", "Ultra Random", "Auto"),
+			None, Up, Down, Jitter, ReverseJitter, HalfUp, HalfDown, Random, Spin, UltraRandom, Auto);
 		Enum(Yaw, Forward, Left, Right, Backwards, Edge, Jitter, Spin, Random, Wiggle, Mercedes, Star, UltraRandom, Freestand);
 		CVarValues(YawReal, "Real yaw", 0, NONE, nullptr,
 			"Forward", "Left", "Right", "Backwards", "Edge", "Jitter", "Spin", "Random", "Wiggle", "Mercedes", "Star", "Ultra Random", "Freestand");
@@ -545,7 +545,6 @@ namespace Vars
 		CVar(InvalidShootPitch, "Hide pitch on shot", false);
 		CVar(TauntSpin, "Taunt Spin", false);
 		CVar(FreestandVisuals, "Freestand visuals", false, VISUAL);
-		CVar(FreestandAutoPitch, "Freestand auto pitch", false);
 		CVar(FreestandSegments, "Freestand segments", 64, SLIDER_CLAMP, 8, 360);
 	NAMESPACE_END(AntiAim);
 

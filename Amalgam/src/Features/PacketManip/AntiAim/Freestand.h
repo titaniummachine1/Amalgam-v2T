@@ -37,7 +37,7 @@ private:
 	void ComputeHeadCircle(CTFPlayer* pLocal);
 	Vec3 HeadPosForYaw(float flYaw) const;
 	void BuildHeatmap(int iSegments);
-	int MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& threat);
+	int MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& threat, float flTargetYaw);
 	void RefineHeatmap(CTFPlayer* pLocal);
 	void SampleThreats(CTFPlayer* pLocal);
 	float FindSafestYaw() const;
@@ -45,6 +45,7 @@ private:
 public:
 	void Run(CTFPlayer* pLocal, CUserCmd* pCmd);
 	float GetFreestandYaw() const { return m_flBestYaw; }
+	float GetYawOffset(float flViewYaw) const;
 	bool HasResult() const { return m_bHasResult; }
 	void Reset();
 

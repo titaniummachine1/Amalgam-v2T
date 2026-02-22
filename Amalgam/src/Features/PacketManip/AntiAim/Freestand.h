@@ -25,9 +25,13 @@ private:
 	float m_flHeadRadius = 0.f;
 	float m_flHeadHeightOffset = 0.f;
 	float m_flHeadYawOffset = 0.f;
+	float m_flCurrentBodyYaw = 0.f;
 	Vec3 m_vOrigin = {};
 	Vec3 m_vViewPos = {};
 	Vec3 m_vHeadCenter = {};
+
+	matrix3x4 m_aBones[MAXSTUDIOBONES] = {};
+	bool m_bBonesSetup = false;
 
 	std::vector<FreestandThreat_t> m_vThreats = {};
 	std::vector<HeatmapPoint_t> m_vHeatmap = {};

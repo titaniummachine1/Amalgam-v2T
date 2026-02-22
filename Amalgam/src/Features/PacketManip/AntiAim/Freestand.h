@@ -1,5 +1,6 @@
 #pragma once
 #include "../../../SDK/SDK.h"
+#include <unordered_map>
 
 struct FreestandThreat_t
 {
@@ -32,6 +33,10 @@ private:
 
 	matrix3x4 m_aBones[MAXSTUDIOBONES] = {};
 	bool m_bBonesSetup = false;
+	int m_iHeadBone = 0;
+
+	mutable std::unordered_map<int, float> m_mYawCorrectionCache = {};
+	Vec3 m_vPrevHeadCenter = {};
 
 	std::vector<FreestandThreat_t> m_vThreats = {};
 	std::vector<HeatmapPoint_t> m_vHeatmap = {};
@@ -39,6 +44,7 @@ private:
 	float m_flBestYaw = 0.f;
 	bool m_bHasResult = false;
 
+	float SolveBodyYawForHeadTarget(float flTargetHeadYaw) const;
 	void GatherThreats(CTFPlayer* pLocal);
 	void ComputeHeadCircle(CTFPlayer* pLocal);
 	Vec3 HeadPosForYaw(float flYaw) const;
@@ -50,7 +56,7 @@ private:
 
 public:
 	void Run(CTFPlayer* pLocal, CUserCmd* pCmd);
-	float GetFreestandYaw() const { return Math::NormalizeAngle(m_flBestYaw - m_flHeadYawOffset); }
+	float GetFreestandYaw() const { return SolveBodyYawForHeadTarget(m_flBestYaw); }
 	float GetYawOffset(float flViewYaw) const;
 	bool HasResult() const { return m_bHasResult; }
 	void Reset();

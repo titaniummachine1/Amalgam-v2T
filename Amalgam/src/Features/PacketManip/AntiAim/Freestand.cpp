@@ -78,6 +78,14 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 
 	m_vHeadCenter = vHeadCenter;
 
+	{
+		auto pModel = pLocal->GetModel();
+		auto pHDR = pModel ? I::ModelInfoClient->GetStudiomodel(pModel) : nullptr;
+		auto pSet = pHDR ? pHDR->pHitboxSet(pLocal->As<CBaseAnimating>()->m_nHitboxSet()) : nullptr;
+		auto pBox = (pSet && pSet->numhitboxes > HEAD_HITBOX) ? pSet->pHitbox(HEAD_HITBOX) : nullptr;
+		m_iHeadBone = pBox ? pBox->bone : 0;
+	}
+
 	Vec3 vHorizontalDelta = vHeadCenter - m_vOrigin;
 	vHorizontalDelta.z = 0.f;
 	m_flHeadRadius = vHorizontalDelta.Length();
@@ -95,6 +103,13 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 	{
 		m_flHeadYawOffset = 0.f;
 	}
+
+	const float flHeadMoveDist = (vHeadCenter - m_vPrevHeadCenter).Length();
+	if (flHeadMoveDist > 2.f)
+	{
+		m_mYawCorrectionCache.clear();
+		m_vPrevHeadCenter = vHeadCenter;
+	}
 }
 
 Vec3 CFreestand::HeadPosForYaw(float flYaw) const
@@ -102,6 +117,53 @@ Vec3 CFreestand::HeadPosForYaw(float flYaw) const
 	float flRad = DEG2RAD(flYaw);
 	Vec3 vCenter = Vec3(m_vOrigin.x, m_vOrigin.y, m_vHeadCenter.z);
 	return vCenter + Vec3(cosf(flRad) * m_flHeadRadius, sinf(flRad) * m_flHeadRadius, 0.f);
+}
+
+float CFreestand::SolveBodyYawForHeadTarget(float flTargetHeadYaw) const
+{
+	const int iCacheKey = static_cast<int>(Math::NormalizeAngle(flTargetHeadYaw) + 360.f) % 360;
+	const auto it = m_mYawCorrectionCache.find(iCacheKey);
+	if (it != m_mYawCorrectionCache.end())
+		return it->second;
+
+	const int iBone = m_iHeadBone;
+
+	float flBodyYaw = Math::NormalizeAngle(flTargetHeadYaw - m_flHeadYawOffset);
+
+	for (int iter = 0; iter < 8; iter++)
+	{
+		const float flRotationYaw = Math::NormalizeAngle(flBodyYaw - m_flCurrentBodyYaw);
+
+		matrix3x4 matRotation;
+		Math::AngleMatrix({ 0.f, flRotationYaw, 0.f }, matRotation);
+
+		matrix3x4 matBone;
+		memcpy(matBone, m_aBones[iBone], sizeof(matrix3x4));
+		matBone[0][3] -= m_vOrigin.x;
+		matBone[1][3] -= m_vOrigin.y;
+		matBone[2][3] -= m_vOrigin.z;
+
+		matrix3x4 matRotatedBone;
+		Math::ConcatTransforms(matRotation, matBone, matRotatedBone);
+
+		matRotatedBone[0][3] += m_vOrigin.x;
+		matRotatedBone[1][3] += m_vOrigin.y;
+		matRotatedBone[2][3] += m_vOrigin.z;
+
+		const float flActualHeadYaw = RAD2DEG(atan2f(
+			matRotatedBone[1][3] - m_vOrigin.y,
+			matRotatedBone[0][3] - m_vOrigin.x
+		));
+		const float flError = Math::NormalizeAngle(flTargetHeadYaw - flActualHeadYaw);
+
+		if (fabsf(flError) < 1.f)
+			break;
+
+		flBodyYaw = Math::NormalizeAngle(flBodyYaw + flError);
+	}
+
+	m_mYawCorrectionCache[iCacheKey] = flBodyYaw;
+	return flBodyYaw;
 }
 
 void CFreestand::SampleThreats(CTFPlayer* pLocal)
@@ -117,28 +179,31 @@ void CFreestand::SampleThreats(CTFPlayer* pLocal)
 	auto pBox = pSet->pHitbox(HEAD_HITBOX);
 	if (!pBox) return;
 
-	int iBone = pBox->bone;
-	Vec3 vMins = pBox->bbmin;
-	Vec3 vMaxs = pBox->bbmax;
+	const int iBone = pBox->bone;
+	const Vec3 vMins = pBox->bbmin;
+	const Vec3 vMaxs = pBox->bbmax;
+	const float flHalfX = (vMaxs.x - vMins.x) * 0.5f;
+	const float flHalfY = (vMaxs.y - vMins.y) * 0.5f;
+	const float flHalfZ = (vMaxs.z - vMins.z) * 0.5f;
 
-	Vec3 vLocalCorners[MULTIPOINT_CORNERS] = {
-		Vec3(vMins.x, vMins.y, vMaxs.z),
-		Vec3(vMaxs.x, vMins.y, vMaxs.z),
-		Vec3(vMins.x, vMaxs.y, vMaxs.z),
-		Vec3(vMaxs.x, vMaxs.y, vMaxs.z),
-		Vec3(vMins.x, vMins.y, vMins.z),
-		Vec3(vMaxs.x, vMins.y, vMins.z),
-		Vec3(vMins.x, vMaxs.y, vMins.z),
-		Vec3(vMaxs.x, vMaxs.y, vMins.z)
+	const Vec3 vLocalCorners[MULTIPOINT_CORNERS] = {
+		Vec3(-flHalfX, -flHalfY,  flHalfZ),
+		Vec3( flHalfX, -flHalfY,  flHalfZ),
+		Vec3(-flHalfX,  flHalfY,  flHalfZ),
+		Vec3( flHalfX,  flHalfY,  flHalfZ),
+		Vec3(-flHalfX, -flHalfY, -flHalfZ),
+		Vec3( flHalfX, -flHalfY, -flHalfZ),
+		Vec3(-flHalfX,  flHalfY, -flHalfZ),
+		Vec3( flHalfX,  flHalfY, -flHalfZ)
 	};
 
 	for (auto& threat : m_vThreats)
 	{
 		for (int s = 0; s < 4; s++)
 		{
-			float flSampleYaw = threat.m_flDirToLocal + SAMPLE_OFFSETS[s];
-			float flBodyYaw = Math::NormalizeAngle(flSampleYaw - m_flHeadYawOffset);
-			float flRotationYaw = Math::NormalizeAngle(flBodyYaw - m_flCurrentBodyYaw);
+			const float flSampleYaw = threat.m_flDirToLocal + SAMPLE_OFFSETS[s];
+			const float flBodyYaw = SolveBodyYawForHeadTarget(flSampleYaw);
+			const float flRotationYaw = Math::NormalizeAngle(flBodyYaw - m_flCurrentBodyYaw);
 
 			matrix3x4 matRotation;
 			Math::AngleMatrix({ 0.f, flRotationYaw, 0.f }, matRotation);
@@ -256,8 +321,8 @@ int CFreestand::MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& thre
 	Vec3 vMaxs = pBox->bbmax;
 	int iBone = pBox->bone;
 
-	float flBodyYaw = Math::NormalizeAngle(flTargetYaw - m_flHeadYawOffset);
-	float flRotationYaw = Math::NormalizeAngle(flBodyYaw - m_flCurrentBodyYaw);
+	const float flBodyYaw = SolveBodyYawForHeadTarget(flTargetYaw);
+	const float flRotationYaw = Math::NormalizeAngle(flBodyYaw - m_flCurrentBodyYaw);
 
 	matrix3x4 matRotation;
 	Math::AngleMatrix({ 0.f, flRotationYaw, 0.f }, matRotation);
@@ -396,9 +461,8 @@ float CFreestand::GetYawOffset(float flViewYaw) const
 	if (!m_bHasResult)
 		return 180.f;
 
-	float flHeadYaw = m_flBestYaw - m_flHeadYawOffset;
-	float flOffset = Math::NormalizeAngle(flHeadYaw - flViewYaw);
-	return flOffset;
+	const float flBodyYaw = SolveBodyYawForHeadTarget(m_flBestYaw);
+	return Math::NormalizeAngle(flBodyYaw - flViewYaw);
 }
 
 void CFreestand::Render()

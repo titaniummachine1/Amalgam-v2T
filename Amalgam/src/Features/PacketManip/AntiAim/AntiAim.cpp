@@ -156,6 +156,8 @@ float CAntiAim::GetYawOffset(CTFPlayer* pEntity, bool bFake)
 	}
 	case Vars::AntiAim::YawEnum::Freestand:
 	{
+		if (bFake)
+			return 0.f;
 		if (F::Freestand.HasResult())
 			return F::Freestand.GetYawOffset(I::EngineClient->GetViewAngles().y);
 		return 180.f;
@@ -209,7 +211,7 @@ void CAntiAim::RunOverlapping(CTFPlayer* pEntity, CUserCmd* pCmd, float& flYaw, 
 float CAntiAim::GetYaw(CTFPlayer* pLocal, CUserCmd* pCmd, bool bFake)
 {
 	const int iMode = bFake ? Vars::AntiAim::YawFake.Value : Vars::AntiAim::YawReal.Value;
-	if (iMode == Vars::AntiAim::YawEnum::Freestand && F::Freestand.HasResult())
+	if (!bFake && iMode == Vars::AntiAim::YawEnum::Freestand && F::Freestand.HasResult())
 	{
 		float flYaw = F::Freestand.GetFreestandYaw();
 		RunOverlapping(pLocal, pCmd, flYaw, bFake);

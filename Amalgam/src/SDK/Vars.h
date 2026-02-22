@@ -525,11 +525,11 @@ namespace Vars
 		CVarEnum(PitchFake, "Fake pitch", 0, NONE, nullptr,
 			VA_LIST("None", "Up", "Down", "Jitter", "Reverse jitter", "Half up", "Half down", "Random", "Spin", "Ultra Random"),
 			None, Up, Down, Jitter, ReverseJitter, HalfUp, HalfDown, Random, Spin, UltraRandom);
-		Enum(Yaw, Forward, Left, Right, Backwards, Edge, Jitter, Spin, Random, Wiggle, Mercedes, Star, UltraRandom);
+		Enum(Yaw, Forward, Left, Right, Backwards, Edge, Jitter, Spin, Random, Wiggle, Mercedes, Star, UltraRandom, Freestand);
 		CVarValues(YawReal, "Real yaw", 0, NONE, nullptr,
-			"Forward", "Left", "Right", "Backwards", "Edge", "Jitter", "Spin", "Random", "Wiggle", "Mercedes", "Star", "Ultra Random");
+			"Forward", "Left", "Right", "Backwards", "Edge", "Jitter", "Spin", "Random", "Wiggle", "Mercedes", "Star", "Ultra Random", "Freestand");
 		CVarValues(YawFake, "Fake yaw", 0, NONE, nullptr,
-			"Forward", "Left", "Right", "Backwards", "Edge", "Jitter", "Spin", "Random", "Wiggle", "Mercedes", "Star", "Ultra Random");
+			"Forward", "Left", "Right", "Backwards", "Edge", "Jitter", "Spin", "Random", "Wiggle", "Mercedes", "Star", "Ultra Random", "Freestand");
 		Enum(YawMode, View, Target);
 		CVarValues(RealYawBase, "Real base", 0, NONE, nullptr,
 			"View", "Target");
@@ -544,6 +544,9 @@ namespace Vars
 		CVar(AntiOverlap, "Anti-overlap", false);
 		CVar(InvalidShootPitch, "Hide pitch on shot", false);
 		CVar(TauntSpin, "Taunt Spin", false);
+		CVar(FreestandVisuals, "Freestand visuals", false, VISUAL);
+		CVar(FreestandAutoPitch, "Freestand auto pitch", false);
+		CVar(FreestandSegments, "Freestand segments", 64, SLIDER_CLAMP, 8, 360);
 	NAMESPACE_END(AntiAim);
 
 	NAMESPACE_BEGIN(Resolver)

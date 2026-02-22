@@ -1327,6 +1327,13 @@ void CMenu::MenuHvH(int iTab)
 					FToggle(Vars::AntiAim::AntiOverlap, FToggleEnum::Left);
 					FToggle(Vars::AntiAim::InvalidShootPitch, FToggleEnum::Right);
 					FToggle(Vars::AntiAim::DisableOnSpectate, FToggleEnum::Left);
+					PushTransparent(Vars::AntiAim::YawReal.Value != Vars::AntiAim::YawEnum::Freestand && Vars::AntiAim::YawFake.Value != Vars::AntiAim::YawEnum::Freestand);
+					{
+						FToggle(Vars::AntiAim::FreestandVisuals, FToggleEnum::Left);
+						FToggle(Vars::AntiAim::FreestandAutoPitch, FToggleEnum::Right);
+						FSlider(Vars::AntiAim::FreestandSegments, FSliderEnum::Left);
+					}
+					PopTransparent();
 				} EndSection();
 			}
 			/* Column 2 */

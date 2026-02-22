@@ -1,4 +1,5 @@
 #include "AntiAim.h"
+#include "Freestand.h"
 
 #include "../../Ticks/Ticks.h"
 #include "../../Players/PlayerUtils.h"
@@ -152,6 +153,12 @@ float CAntiAim::GetYawOffset(CTFPlayer* pEntity, bool bFake)
 			return fmod(I::GlobalVars->tickcount * flSpinSpeed[i] + 180.f, 360.f) - 180.f;
 		else
 			return flYawOffset[i];
+	}
+	case Vars::AntiAim::YawEnum::Freestand:
+	{
+		if (F::Freestand.HasResult())
+			return F::Freestand.GetFreestandYaw();
+		return 180.f;
 	}
 	}
 	return 0.f;
@@ -307,6 +314,10 @@ void CAntiAim::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 	}
 
 	vEdgeTrace.clear();
+
+	if (Vars::AntiAim::YawReal.Value == Vars::AntiAim::YawEnum::Freestand
+		|| Vars::AntiAim::YawFake.Value == Vars::AntiAim::YawEnum::Freestand)
+		F::Freestand.Run(pLocal, pCmd);
 
 	Vec2& vAngles = G::SendPacket ? vFakeAngles : vRealAngles;
 	vAngles.x = iAntiBackstab != 2 ? GetPitch(pCmd->viewangles.x) : pCmd->viewangles.x;

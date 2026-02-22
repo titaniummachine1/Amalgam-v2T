@@ -208,6 +208,14 @@ void CAntiAim::RunOverlapping(CTFPlayer* pEntity, CUserCmd* pCmd, float& flYaw, 
 
 float CAntiAim::GetYaw(CTFPlayer* pLocal, CUserCmd* pCmd, bool bFake)
 {
+	const int iMode = bFake ? Vars::AntiAim::YawFake.Value : Vars::AntiAim::YawReal.Value;
+	if (iMode == Vars::AntiAim::YawEnum::Freestand && F::Freestand.HasResult())
+	{
+		float flYaw = F::Freestand.GetFreestandYaw();
+		RunOverlapping(pLocal, pCmd, flYaw, bFake);
+		return flYaw;
+	}
+
 	float flYaw = GetBaseYaw(pLocal, pCmd, bFake) + GetYawOffset(pLocal, bFake);
 	RunOverlapping(pLocal, pCmd, flYaw, bFake);
 	return flYaw;
@@ -241,6 +249,15 @@ float CAntiAim::GetPitch(float flCurPitch)
 		flRealPitch = flPitch;
 		break;
 	}
+	case Vars::AntiAim::PitchRealEnum::Auto:
+	{
+		Vec3 vEye = F::Freestand.GetViewPos();
+		Vec3 vHead = F::Freestand.GetHeadCenter();
+		Vec3 vDelta = vHead - vEye;
+		vDelta.z = 0.f;
+		flRealPitch = (vDelta.Length() > 0.1f) ? -89.f : 89.f;
+		break;
+	}
 	}
 
 	switch (Vars::AntiAim::PitchFake.Value)
@@ -263,6 +280,15 @@ float CAntiAim::GetPitch(float flCurPitch)
 			flPitch = SDK::RandomFloat(-89.f, 89.f);
 		}
 		flFakePitch = flPitch;
+		break;
+	}
+	case Vars::AntiAim::PitchFakeEnum::Auto:
+	{
+		Vec3 vEye = F::Freestand.GetViewPos();
+		Vec3 vHead = F::Freestand.GetHeadCenter();
+		Vec3 vDelta = vHead - vEye;
+		vDelta.z = 0.f;
+		flFakePitch = (vDelta.Length() > 0.1f) ? -89.f : 89.f;
 		break;
 	}
 	}
@@ -316,7 +342,9 @@ void CAntiAim::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 	vEdgeTrace.clear();
 
 	if (Vars::AntiAim::YawReal.Value == Vars::AntiAim::YawEnum::Freestand
-		|| Vars::AntiAim::YawFake.Value == Vars::AntiAim::YawEnum::Freestand)
+		|| Vars::AntiAim::YawFake.Value == Vars::AntiAim::YawEnum::Freestand
+		|| Vars::AntiAim::PitchReal.Value == Vars::AntiAim::PitchRealEnum::Auto
+		|| Vars::AntiAim::PitchFake.Value == Vars::AntiAim::PitchFakeEnum::Auto)
 		F::Freestand.Run(pLocal, pCmd);
 
 	Vec2& vAngles = G::SendPacket ? vFakeAngles : vRealAngles;

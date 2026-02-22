@@ -24,6 +24,8 @@ class CFreestand
 private:
 	float m_flHeadRadius = 0.f;
 	float m_flHeadHeightOffset = 0.f;
+	float m_flHeadYawOffset = 0.f;
+	Vec3 m_vOrigin = {};
 	Vec3 m_vViewPos = {};
 	Vec3 m_vHeadCenter = {};
 
@@ -44,7 +46,7 @@ private:
 
 public:
 	void Run(CTFPlayer* pLocal, CUserCmd* pCmd);
-	float GetFreestandYaw() const { return m_flBestYaw; }
+	float GetFreestandYaw() const { return Math::NormalizeAngle(m_flBestYaw - m_flHeadYawOffset); }
 	float GetYawOffset(float flViewYaw) const;
 	bool HasResult() const { return m_bHasResult; }
 	void Reset();
@@ -54,6 +56,7 @@ public:
 	const std::vector<HeatmapPoint_t>& GetHeatmap() const { return m_vHeatmap; }
 	const std::vector<FreestandThreat_t>& GetThreats() const { return m_vThreats; }
 	Vec3 GetViewPos() const { return m_vViewPos; }
+	Vec3 GetHeadCenter() const { return m_vHeadCenter; }
 	float GetHeadRadius() const { return m_flHeadRadius; }
 	float GetHeadHeightOffset() const { return m_flHeadHeightOffset; }
 };

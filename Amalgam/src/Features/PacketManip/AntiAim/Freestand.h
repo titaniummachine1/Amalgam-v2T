@@ -5,7 +5,8 @@ struct FreestandThreat_t
 {
 	CTFPlayer* m_pPlayer = nullptr;
 	Vec3 m_vEyePos = {};
-	Vec3 m_vForward = {};
+	float m_flDirToLocal = 0.f;
+	bool m_bSampleHit[4] = {};
 	int m_iHeadshotCount = 0;
 };
 
@@ -14,7 +15,7 @@ struct HeatmapPoint_t
 	float m_flYawAngle = 0.f;
 	Vec3 m_vHeadPos = {};
 	float m_flSafety = 1.f;
-	int m_iHitsOut8 = -1;
+	int m_iHitsOut8 = 0;
 	bool m_bVerified = false;
 };
 
@@ -35,10 +36,10 @@ private:
 	void GatherThreats(CTFPlayer* pLocal);
 	void ComputeHeadCircle(CTFPlayer* pLocal);
 	Vec3 HeadPosForYaw(float flYaw) const;
-	float ComputeThreatGradient(const FreestandThreat_t& threat, float flYaw) const;
 	void BuildHeatmap(int iSegments);
-	int MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& threat, float flYaw);
-	void RefineHeatmap(CTFPlayer* pLocal, int iMaxIterations);
+	int MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& threat);
+	void RefineHeatmap(CTFPlayer* pLocal);
+	void SampleThreats(CTFPlayer* pLocal);
 	float FindSafestYaw() const;
 
 public:

@@ -1,12 +1,12 @@
 #include "Freestand.h"
 
 #include "../../Players/PlayerUtils.h"
-#include "../../Backtrack/Backtrack.h"
 
 static constexpr int HEAD_HITBOX = 0;
 static constexpr int MULTIPOINT_CORNERS = 8;
 static constexpr int MAX_REFINE_ITERATIONS = 3;
 static constexpr float THREAT_MAX_DISTANCE = 4000.f;
+static constexpr float SAMPLE_OFFSETS[4] = { 0.f, 90.f, -90.f, 180.f };
 
 void CFreestand::Reset()
 {
@@ -43,22 +43,18 @@ void CFreestand::GatherThreats(CTFPlayer* pLocal)
 		FreestandThreat_t threat;
 		threat.m_pPlayer = pPlayer;
 		threat.m_vEyePos = pPlayer->GetShootPos();
-
-		Vec3 vAngles = pPlayer->GetEyeAngles();
-		Math::AngleVectors(vAngles, &threat.m_vForward);
-
 		threat.m_iHeadshotCount = 0;
+
+		Vec3 vDelta = pLocal->m_vecOrigin() - pPlayer->m_vecOrigin();
+		vDelta.z = 0.f;
+		const float flLen = vDelta.Length();
+		threat.m_flDirToLocal = (flLen > 1.f) ? RAD2DEG(atan2f(vDelta.y, vDelta.x)) : 0.f;
+
+		for (int s = 0; s < 4; s++)
+			threat.m_bSampleHit[s] = false;
+
 		m_vThreats.push_back(threat);
 	}
-
-	std::sort(m_vThreats.begin(), m_vThreats.end(), [](const FreestandThreat_t& a, const FreestandThreat_t& b)
-	{
-		bool aSni = a.m_pPlayer->m_iClass() == TF_CLASS_SNIPER;
-		bool bSni = b.m_pPlayer->m_iClass() == TF_CLASS_SNIPER;
-		if (aSni != bSni)
-			return aSni;
-		return a.m_iHeadshotCount > b.m_iHeadshotCount;
-	});
 }
 
 void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
@@ -100,23 +96,28 @@ Vec3 CFreestand::HeadPosForYaw(float flYaw) const
 	return vCenter + Vec3(cosf(flRad) * m_flHeadRadius, sinf(flRad) * m_flHeadRadius, 0.f);
 }
 
-float CFreestand::ComputeThreatGradient(const FreestandThreat_t& threat, float flYaw) const
+void CFreestand::SampleThreats(CTFPlayer* pLocal)
 {
-	Vec3 vHeadPos = HeadPosForYaw(flYaw);
-	Vec3 vToHead = vHeadPos - threat.m_vEyePos;
-	float flLen = vToHead.Length();
-	if (flLen < 1.f)
-		return 0.f;
+	for (auto& threat : m_vThreats)
+	{
+		CTraceFilterHitscan filter(threat.m_pPlayer);
+		for (int s = 0; s < 4; s++)
+		{
+			float flSampleYaw = threat.m_flDirToLocal + SAMPLE_OFFSETS[s];
+			Vec3 vHeadPos = HeadPosForYaw(flSampleYaw);
 
-	vToHead /= flLen;
-	float flDot = threat.m_vForward.Dot(vToHead);
-	flDot = std::clamp(flDot, -1.f, 1.f);
-	float flAngleDeg = RAD2DEG(acosf(flDot));
+			CGameTrace trace = {};
+			SDK::Trace(threat.m_vEyePos, vHeadPos, MASK_SHOT | CONTENTS_GRATE, &filter, &trace);
 
-	float flNorm = std::clamp(flAngleDeg / 180.f, 0.f, 1.f);
-	float flSafety = flNorm * flNorm;
+			threat.m_bSampleHit[s] = (trace.fraction >= 1.f || (trace.m_pEnt && trace.m_pEnt == pLocal));
+		}
+	}
+}
 
-	return flSafety;
+static float AngleDiff(float a, float b)
+{
+	float d = fmodf(a - b + 540.f, 360.f) - 180.f;
+	return fabsf(d);
 }
 
 void CFreestand::BuildHeatmap(int iSegments)
@@ -133,6 +134,8 @@ void CFreestand::BuildHeatmap(int iSegments)
 		HeatmapPoint_t point;
 		point.m_flYawAngle = flYaw;
 		point.m_vHeadPos = HeadPosForYaw(flYaw);
+		point.m_iHitsOut8 = -1;
+		point.m_bVerified = false;
 
 		if (m_vThreats.empty())
 		{
@@ -142,18 +145,29 @@ void CFreestand::BuildHeatmap(int iSegments)
 		{
 			float flTotalSafety = 0.f;
 			for (const auto& threat : m_vThreats)
-				flTotalSafety += ComputeThreatGradient(threat, flYaw);
-
+			{
+				float flBestWeight = 0.f;
+				float flWeightedSafety = 0.f;
+				for (int s = 0; s < 4; s++)
+				{
+					float flSampleYaw = threat.m_flDirToLocal + SAMPLE_OFFSETS[s];
+					float flDiff = AngleDiff(flYaw, flSampleYaw);
+					float flWeight = 1.f - std::clamp(flDiff / 90.f, 0.f, 1.f);
+					float flSafe = threat.m_bSampleHit[s] ? 0.f : 1.f;
+					flWeightedSafety += flWeight * flSafe;
+					flBestWeight += flWeight;
+				}
+				if (flBestWeight > 0.f)
+					flTotalSafety += flWeightedSafety / flBestWeight;
+			}
 			point.m_flSafety = flTotalSafety / static_cast<float>(m_vThreats.size());
 		}
 
-		point.m_iHitsOut8 = -1;
-		point.m_bVerified = false;
 		m_vHeatmap.push_back(point);
 	}
 }
 
-int CFreestand::MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& threat, float flYaw)
+int CFreestand::MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& threat)
 {
 	matrix3x4 aBones[MAXSTUDIOBONES];
 	if (!pLocal->SetupBones(aBones, MAXSTUDIOBONES, BONE_USED_BY_ANYTHING, pLocal->m_flSimulationTime()))
@@ -201,15 +215,15 @@ int CFreestand::MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& thre
 	return iHits;
 }
 
-void CFreestand::RefineHeatmap(CTFPlayer* pLocal, int iMaxIterations)
+void CFreestand::RefineHeatmap(CTFPlayer* pLocal)
 {
-	for (int iter = 0; iter < iMaxIterations; iter++)
+	for (int iter = 0; iter < MAX_REFINE_ITERATIONS; iter++)
 	{
 		float flBestSafety = -1.f;
 		int iBestIdx = -1;
 		for (int i = 0; i < static_cast<int>(m_vHeatmap.size()); i++)
 		{
-			if (m_vHeatmap[i].m_flSafety > flBestSafety)
+			if (!m_vHeatmap[i].m_bVerified && m_vHeatmap[i].m_flSafety > flBestSafety)
 			{
 				flBestSafety = m_vHeatmap[i].m_flSafety;
 				iBestIdx = i;
@@ -220,52 +234,23 @@ void CFreestand::RefineHeatmap(CTFPlayer* pLocal, int iMaxIterations)
 			break;
 
 		auto& bestPoint = m_vHeatmap[iBestIdx];
-		if (bestPoint.m_bVerified)
-			break;
-
 		bestPoint.m_bVerified = true;
 
 		int iTotalHits = 0;
-		int iTotalChecks = 0;
 		for (auto& threat : m_vThreats)
 		{
-			Vec3 vToHead = bestPoint.m_vHeadPos - threat.m_vEyePos;
-			float flLen = vToHead.Length();
-			if (flLen < 1.f)
-				continue;
-			vToHead /= flLen;
-
-			float flDot = threat.m_vForward.Dot(vToHead);
-			float flAngle = RAD2DEG(acosf(std::clamp(flDot, -1.f, 1.f)));
-
-			if (flAngle > 60.f)
-			{
-				continue;
-			}
-
-			Vec3 vCenter = bestPoint.m_vHeadPos;
-			CGameTrace traceCenter = {};
-			CTraceFilterHitscan filterCenter(threat.m_pPlayer);
-			SDK::Trace(threat.m_vEyePos, vCenter, MASK_SHOT | CONTENTS_GRATE, &filterCenter, &traceCenter);
-
-			if (traceCenter.fraction >= 1.f || (traceCenter.m_pEnt && traceCenter.m_pEnt == pLocal))
-			{
-				int iHits = MultipointCheck(pLocal, threat, bestPoint.m_flYawAngle);
-				iTotalHits += iHits;
-				iTotalChecks += MULTIPOINT_CORNERS;
-				threat.m_iHeadshotCount += (iHits > 0) ? 1 : 0;
-			}
-			else
-			{
-				iTotalChecks += MULTIPOINT_CORNERS;
-			}
+			int iHits = MultipointCheck(pLocal, threat);
+			iTotalHits += iHits;
+			if (iHits > 0)
+				threat.m_iHeadshotCount++;
 		}
 
-		if (iTotalChecks > 0)
+		const int iMaxHits = static_cast<int>(m_vThreats.size()) * MULTIPOINT_CORNERS;
+		if (iMaxHits > 0)
 		{
-			float flHitRatio = static_cast<float>(iTotalHits) / static_cast<float>(iTotalChecks);
+			float flHitRatio = static_cast<float>(iTotalHits) / static_cast<float>(iMaxHits);
 			bestPoint.m_iHitsOut8 = iTotalHits;
-			bestPoint.m_flSafety *= (1.f - flHitRatio);
+			bestPoint.m_flSafety = 1.f - flHitRatio;
 		}
 	}
 }
@@ -292,17 +277,19 @@ void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd)
 	Reset();
 
 	GatherThreats(pLocal);
-	if (m_vThreats.empty())
-		return;
 
 	ComputeHeadCircle(pLocal);
 	if (m_flHeadRadius < 0.01f)
 		return;
 
+	if (!m_vThreats.empty())
+		SampleThreats(pLocal);
+
 	const int iSegments = Vars::AntiAim::FreestandSegments.Value;
 	BuildHeatmap(iSegments);
 
-	RefineHeatmap(pLocal, MAX_REFINE_ITERATIONS);
+	if (!m_vThreats.empty())
+		RefineHeatmap(pLocal);
 
 	m_flBestYaw = FindSafestYaw();
 	m_bHasResult = true;
@@ -322,17 +309,13 @@ void CFreestand::Render()
 
 	const int iSize = static_cast<int>(m_vHeatmap.size());
 
+	const float flExpiry = I::GlobalVars->curtime + 0.1f;
+
 	for (int i = 0; i < iSize; i++)
 	{
 		int j = (i + 1) % iSize;
 
-		Vec3 vScreen1, vScreen2;
-		if (!SDK::W2S(m_vHeatmap[i].m_vHeadPos, vScreen1))
-			continue;
-		if (!SDK::W2S(m_vHeatmap[j].m_vHeadPos, vScreen2))
-			continue;
-
-		float flSafety = m_vHeatmap[i].m_flSafety;
+		float flSafety = std::clamp(m_vHeatmap[i].m_flSafety, 0.f, 1.f);
 
 		Color_t tColor;
 		if (m_vThreats.empty())
@@ -341,16 +324,14 @@ void CFreestand::Render()
 		}
 		else
 		{
-			int r = static_cast<int>((1.f - flSafety) * 255.f);
-			int g = static_cast<int>(flSafety * 255.f);
-			tColor = { static_cast<byte>(std::clamp(r, 0, 255)),
-					   static_cast<byte>(std::clamp(g, 0, 255)),
-					   0, 200 };
+			byte r = static_cast<byte>((1.f - flSafety) * 255.f);
+			byte g = static_cast<byte>(flSafety * 255.f);
+			tColor = { r, g, 0, 220 };
 		}
 
 		G::LineStorage.emplace_back(
 			std::pair<Vec3, Vec3>(m_vHeatmap[i].m_vHeadPos, m_vHeatmap[j].m_vHeadPos),
-			I::GlobalVars->curtime + 0.015f,
+			flExpiry,
 			tColor,
 			false
 		);
@@ -359,15 +340,11 @@ void CFreestand::Render()
 	if (m_bHasResult)
 	{
 		Vec3 vBestHead = HeadPosForYaw(m_flBestYaw);
-		Vec3 vScreen;
-		if (SDK::W2S(vBestHead, vScreen))
-		{
-			G::LineStorage.emplace_back(
-				std::pair<Vec3, Vec3>(m_vViewPos, vBestHead),
-				I::GlobalVars->curtime + 0.015f,
-				Color_t(0, 255, 255, 255),
-				false
-			);
-		}
+		G::LineStorage.emplace_back(
+			std::pair<Vec3, Vec3>(m_vViewPos, vBestHead),
+			flExpiry,
+			Color_t(0, 255, 255, 255),
+			false
+		);
 	}
 }

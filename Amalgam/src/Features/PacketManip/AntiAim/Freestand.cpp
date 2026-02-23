@@ -120,11 +120,18 @@ bool CFreestand::SetupBonesForYaw(CTFPlayer* pLocal, float flBodyYaw, matrix3x4*
 		return false;
 
 	const float flOriginalYaw = pLocal->m_angEyeAnglesY();
-	pLocal->m_angEyeAnglesY() = flBodyYaw;
+	const int iOriginalEffects = pLocal->m_fEffects();
 
-	const bool bSuccess = pLocal->SetupBones(pBonesOut, MAXSTUDIOBONES, BONE_USED_BY_ANYTHING, pLocal->m_flSimulationTime());
+	pLocal->m_angEyeAnglesY() = flBodyYaw;
+	
+	pLocal->m_fEffects() |= 0x0010;
+	pLocal->InvalidateBoneCache();
+
+	const bool bSuccess = pLocal->SetupBones(pBonesOut, MAXSTUDIOBONES, BONE_USED_BY_ANYTHING, I::GlobalVars->curtime);
 
 	pLocal->m_angEyeAnglesY() = flOriginalYaw;
+	pLocal->m_fEffects() = iOriginalEffects;
+
 	return bSuccess;
 }
 

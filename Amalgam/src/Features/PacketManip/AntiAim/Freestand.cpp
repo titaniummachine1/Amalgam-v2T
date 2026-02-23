@@ -300,8 +300,8 @@ void CFreestand::SampleThreats(CTFPlayer* pLocal)
 				continue;
 			}
 
-			CTraceFilterHitscan filter(pLocal);
-			filter.m_pSkip = threat.m_pPlayer;
+			CTraceFilterHitscan filter;
+			filter.m_pSkip = pLocal;
 
 			Vec3 vHeadCenter;
 			Math::VectorTransform(Vec3(0, 0, 0), tempBones[iBone], vHeadCenter);
@@ -464,8 +464,8 @@ int CFreestand::MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& thre
 	};
 
 	int iHits = 0;
-	CTraceFilterHitscan filter(pLocal);
-	filter.m_pSkip = threat.m_pPlayer;
+	CTraceFilterHitscan filter;
+	filter.m_pSkip = pLocal;
 
 	for (int c = 0; c < MULTIPOINT_CORNERS; c++)
 	{

@@ -14,8 +14,9 @@ void CFreestand::Reset()
 	m_flHeadHeightOffset = 0.f;
 	m_vThreats.clear();
 	m_vHeatmap.clear();
-	m_flBestYaw = 0.f;
-	m_bHasResult = false;
+	m_flSafestYaw = 0.f;
+	m_flMostDangerousYaw = 0.f;
+	m_bHasSafeYaw = false;
 }
 
 void CFreestand::GatherThreats(CTFPlayer* pLocal)
@@ -552,10 +553,10 @@ void CFreestand::Render()
 		);
 	}
 
-	if (m_bHasResult)
+	if (m_bHasSafeYaw)
 	{
 		Vec3 vCircleCenter = Vec3(m_vOrigin.x, m_vOrigin.y, m_vHeadCenter.z);
-		Vec3 vBestWorld = HeadPosForYaw(m_flBestYaw);
+		Vec3 vBestWorld = HeadPosForYaw(m_flSafestYaw);
 		G::LineStorage.emplace_back(
 			std::pair<Vec3, Vec3>(vCircleCenter, vBestWorld),
 			flExpiry, Color_t(0, 255, 0, 255), false

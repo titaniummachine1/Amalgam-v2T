@@ -43,7 +43,7 @@ private:
 
 	static constexpr int MAX_HEATMAP_RESOLUTION = 720;
 	float m_aHeatmapThreat[MAX_HEATMAP_RESOLUTION] = {};
-	int m_aHeatmapContributions[MAX_HEATMAP_RESOLUTION] = {};
+	int m_iTotalShotsAdded = 0;
 
 	std::vector<HeatmapPoint_t> m_vHeatmap = {};
 
@@ -53,7 +53,6 @@ private:
 
 	bool SetupBonesForYaw(CTFPlayer* pLocal, float flBodyYaw, matrix3x4* pBonesOut);
 	Vec3 GetHeadCenterFromBones(const matrix3x4* pBones) const;
-	float SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHeadYaw);
 	void GatherThreats(CTFPlayer* pLocal);
 	void ComputeHeadCircle(CTFPlayer* pLocal);
 	Vec3 HeadPosForYaw(float flYaw) const;
@@ -73,6 +72,7 @@ public:
 	bool HasSafeYaw() const { return m_bHasSafeYaw; }
 	float GetSafestYaw() const { return m_flSafestYaw; }
 	float GetMostDangerousYaw() const { return m_flMostDangerousYaw; }
+	float SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHeadYaw);
 	void Reset();
 
 	void Render();

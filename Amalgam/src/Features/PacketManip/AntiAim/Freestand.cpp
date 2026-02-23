@@ -254,7 +254,7 @@ void CFreestand::ClearHeatmap(int iResolution)
 {
 	const int iSize = std::min(iResolution, MAX_HEATMAP_RESOLUTION);
 	memset(m_aHeatmapThreat, 0, sizeof(float) * iSize);
-	memset(m_aHeatmapContributions, 0, sizeof(int) * iSize);
+	m_iTotalShotsAdded = 0;
 }
 
 void CFreestand::AccumulateThreatSample(float flYaw, float flThreatValue, int iResolution)
@@ -271,12 +271,16 @@ void CFreestand::AccumulateThreatSample(float flYaw, float flThreatValue, int iR
 		const float flInterpolatedThreat = flThreatValue * (1.f - flNorm);
 
 		m_aHeatmapThreat[i] += flInterpolatedThreat;
-		m_aHeatmapContributions[i]++;
 	}
+
+	m_iTotalShotsAdded++;
 }
 
 float CFreestand::GetNormalizedSafety(float flYaw, int iResolution) const
 {
+	if (m_iTotalShotsAdded == 0)
+		return 1.f;
+
 	const int iSize = std::min(iResolution, MAX_HEATMAP_RESOLUTION);
 	const float flStep = 360.f / static_cast<float>(iSize);
 	const float flNormYaw = Math::NormalizeAngle(flYaw) + 180.f;
@@ -285,19 +289,16 @@ float CFreestand::GetNormalizedSafety(float flYaw, int iResolution) const
 	const int iIndex1 = (iIndex0 + 1) % iSize;
 	const float flFrac = flIndex - floorf(flIndex);
 
-	const float flThreat0 = m_aHeatmapContributions[iIndex0] > 0 
-		? m_aHeatmapThreat[iIndex0] / static_cast<float>(m_aHeatmapContributions[iIndex0]) 
-		: 0.f;
-	const float flThreat1 = m_aHeatmapContributions[iIndex1] > 0 
-		? m_aHeatmapThreat[iIndex1] / static_cast<float>(m_aHeatmapContributions[iIndex1]) 
-		: 0.f;
+	const float flThreat0 = m_aHeatmapThreat[iIndex0] / static_cast<float>(m_iTotalShotsAdded);
+	const float flThreat1 = m_aHeatmapThreat[iIndex1] / static_cast<float>(m_iTotalShotsAdded);
 
 	const float flInterpolatedThreat = flThreat0 * (1.f - flFrac) + flThreat1 * flFrac;
 	return 1.f - std::clamp(flInterpolatedThreat, 0.f, 1.f);
 }
 
-void CFreestand::BuildHeatmap(int iResolution)
+void CFreestand::BuildHeatmap(float flDegreesPerSegment)
 {
+	const int iResolution = static_cast<int>(360.f / flDegreesPerSegment);
 	ClearHeatmap(iResolution);
 
 	if (m_vThreats.empty())
@@ -316,11 +317,12 @@ void CFreestand::BuildHeatmap(int iResolution)
 	}
 }
 
-void CFreestand::BuildHeatmapVisualization(int iVisualSegments, int iDataResolution)
+void CFreestand::BuildHeatmapVisualization(int iVisualSegments, float flDataDegreesPerSegment)
 {
 	m_vHeatmap.clear();
 	m_vHeatmap.reserve(iVisualSegments);
 
+	const int iDataResolution = static_cast<int>(360.f / flDataDegreesPerSegment);
 	const float flStep = 360.f / static_cast<float>(iVisualSegments);
 
 	for (int i = 0; i < iVisualSegments; i++)
@@ -436,7 +438,8 @@ void CFreestand::RefineHeatmap(CTFPlayer* pLocal)
 
 float CFreestand::FindSafestYaw() const
 {
-	const int iResolution = Vars::AntiAim::FreestandHeatmapResolution.Value;
+	const float flDegreesPerSegment = Vars::AntiAim::FreestandDegreesPerSegment.Value;
+	const int iResolution = static_cast<int>(360.f / flDegreesPerSegment);
 	const float flStep = 360.f / static_cast<float>(iResolution);
 
 	float flBestSafety = -1.f;
@@ -459,7 +462,8 @@ float CFreestand::FindSafestYaw() const
 
 float CFreestand::FindMostDangerousYaw() const
 {
-	const int iResolution = Vars::AntiAim::FreestandHeatmapResolution.Value;
+	const float flDegreesPerSegment = Vars::AntiAim::FreestandDegreesPerSegment.Value;
+	const int iResolution = static_cast<int>(360.f / flDegreesPerSegment);
 	const float flStep = 360.f / static_cast<float>(iResolution);
 
 	float flWorstSafety = 2.f;
@@ -496,28 +500,19 @@ void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd)
 	if (!m_vThreats.empty())
 		SampleThreats(pLocal);
 
-	const int iHeatmapResolution = Vars::AntiAim::FreestandHeatmapResolution.Value;
-	BuildHeatmap(iHeatmapResolution);
+	const float flDegreesPerSegment = Vars::AntiAim::FreestandDegreesPerSegment.Value;
+	BuildHeatmap(flDegreesPerSegment);
 
-	m_flBestYaw = FindSafestYaw();
-	m_flWorstYaw = FindMostDangerousYaw();
+	m_flSafestYaw = FindSafestYaw();
+	m_flMostDangerousYaw = FindMostDangerousYaw();
 
 	const int iVisualSegments = Vars::AntiAim::FreestandSegments.Value;
-	BuildHeatmapVisualization(iVisualSegments, iHeatmapResolution);
+	BuildHeatmapVisualization(iVisualSegments, flDegreesPerSegment);
 
 	if (!m_vThreats.empty())
 		RefineHeatmap(pLocal);
 
-	m_bHasResult = true;
-}
-
-float CFreestand::GetYawOffset(CTFPlayer* pLocal, float flViewYaw)
-{
-	if (!m_bHasResult || !pLocal)
-		return 180.f;
-
-	const float flBodyYaw = SolveBodyYawForHeadTarget(pLocal, m_flBestYaw);
-	return Math::NormalizeAngle(flBodyYaw - flViewYaw);
+	m_bHasSafeYaw = (m_vThreats.empty() || GetNormalizedSafety(m_flSafestYaw, static_cast<int>(360.f / flDegreesPerSegment)) >= 0.99f);
 }
 
 void CFreestand::Render()

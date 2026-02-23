@@ -154,16 +154,6 @@ float CAntiAim::GetYawOffset(CTFPlayer* pEntity, bool bFake)
 		else
 			return flYawOffset[i];
 	}
-	case Vars::AntiAim::YawEnum::Freestand:
-	{
-		if (bFake)
-			return 0.f;
-		if (F::Freestand.HasResult())
-			return F::Freestand.GetYawOffset(pEntity->As<CTFPlayer>(), I::EngineClient->GetViewAngles().y);
-		return 180.f;
-	}
-	case Vars::AntiAim::YawEnum::FreestandUnsafe:
-		return 0.f;
 	}
 	return 0.f;
 }
@@ -212,22 +202,25 @@ void CAntiAim::RunOverlapping(CTFPlayer* pEntity, CUserCmd* pCmd, float& flYaw, 
 
 float CAntiAim::GetYaw(CTFPlayer* pLocal, CUserCmd* pCmd, bool bFake)
 {
-	const int iMode = bFake ? Vars::AntiAim::YawFake.Value : Vars::AntiAim::YawReal.Value;
-	if (iMode == Vars::AntiAim::YawEnum::Freestand && !bFake && F::Freestand.HasResult())
-	{
-		float flYaw = F::Freestand.GetFreestandYaw(pLocal);
-		RunOverlapping(pLocal, pCmd, flYaw, bFake);
-		return flYaw;
-	}
-
-	if (iMode == Vars::AntiAim::YawEnum::FreestandUnsafe && F::Freestand.HasResult())
-	{
-		float flYaw = F::Freestand.GetFakeYaw(pLocal);
-		RunOverlapping(pLocal, pCmd, flYaw, bFake);
-		return flYaw;
-	}
-
 	float flYaw = GetBaseYaw(pLocal, pCmd, bFake) + GetYawOffset(pLocal, bFake);
+
+	if (Vars::AntiAim::FreestandEnabled.Value && F::Freestand.HasSafeYaw())
+	{
+		if (!bFake)
+		{
+			const float flSafeYaw = F::Freestand.GetSafestYaw();
+			flYaw = F::Freestand.SolveBodyYawForHeadTarget(pLocal, flSafeYaw);
+		}
+		else if (Vars::AntiAim::FreestandOverrideFake.Value)
+		{
+			if (Vars::AntiAim::FreestandFakeYawMode.Value == Vars::AntiAim::FreestandFakeModeEnum::MostDangerous)
+			{
+				const float flDangerousYaw = F::Freestand.GetMostDangerousYaw();
+				flYaw = F::Freestand.SolveBodyYawForHeadTarget(pLocal, flDangerousYaw);
+			}
+		}
+	}
+
 	RunOverlapping(pLocal, pCmd, flYaw, bFake);
 	return flYaw;
 }
@@ -352,10 +345,7 @@ void CAntiAim::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 
 	vEdgeTrace.clear();
 
-	const bool bNeedsFreestand = Vars::AntiAim::YawReal.Value == Vars::AntiAim::YawEnum::Freestand
-		|| Vars::AntiAim::YawReal.Value == Vars::AntiAim::YawEnum::FreestandUnsafe
-		|| Vars::AntiAim::YawFake.Value == Vars::AntiAim::YawEnum::Freestand
-		|| Vars::AntiAim::YawFake.Value == Vars::AntiAim::YawEnum::FreestandUnsafe
+	const bool bNeedsFreestand = Vars::AntiAim::FreestandEnabled.Value
 		|| Vars::AntiAim::PitchReal.Value == Vars::AntiAim::PitchRealEnum::Auto
 		|| Vars::AntiAim::PitchFake.Value == Vars::AntiAim::PitchFakeEnum::Auto;
 	if (bNeedsFreestand)

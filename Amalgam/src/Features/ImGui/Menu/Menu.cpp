@@ -1327,8 +1327,16 @@ void CMenu::MenuHvH(int iTab)
 					FToggle(Vars::AntiAim::AntiOverlap, FToggleEnum::Left);
 					FToggle(Vars::AntiAim::InvalidShootPitch, FToggleEnum::Right);
 					FToggle(Vars::AntiAim::DisableOnSpectate, FToggleEnum::Left);
-					PushTransparent(Vars::AntiAim::YawReal.Value != Vars::AntiAim::YawEnum::Freestand && Vars::AntiAim::YawReal.Value != Vars::AntiAim::YawEnum::FreestandUnsafe && Vars::AntiAim::YawFake.Value != Vars::AntiAim::YawEnum::Freestand && Vars::AntiAim::YawFake.Value != Vars::AntiAim::YawEnum::FreestandUnsafe);
+					FToggle(Vars::AntiAim::FreestandEnabled, FToggleEnum::Left);
+					PushTransparent(!Vars::AntiAim::FreestandEnabled.Value);
 					{
+						FSlider(Vars::AntiAim::FreestandDegreesPerSegment, FSliderEnum::Left);
+						FToggle(Vars::AntiAim::FreestandOverrideFake, FToggleEnum::Right);
+						PushTransparent(!Vars::AntiAim::FreestandOverrideFake.Value);
+						{
+							FDropdown(Vars::AntiAim::FreestandFakeYawMode, FDropdownEnum::Left);
+						}
+						PopTransparent();
 						FToggle(Vars::AntiAim::FreestandVisuals, FToggleEnum::Left);
 						FSlider(Vars::AntiAim::FreestandSegments, FSliderEnum::Right);
 					}

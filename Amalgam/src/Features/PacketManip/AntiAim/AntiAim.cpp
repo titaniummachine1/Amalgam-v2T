@@ -225,7 +225,7 @@ float CAntiAim::GetYaw(CTFPlayer* pLocal, CUserCmd* pCmd, bool bFake)
 	return flYaw;
 }
 
-float CAntiAim::GetPitch(float flCurPitch)
+float CAntiAim::GetPitch(CTFPlayer* pLocal, float flCurPitch)
 {
 	float flRealPitch = 0.f, flFakePitch = 0.f;
 	int iJitter = GetJitter(FNV1A::Hash32Const("Pitch"));
@@ -255,11 +255,7 @@ float CAntiAim::GetPitch(float flCurPitch)
 	}
 	case Vars::AntiAim::PitchRealEnum::Auto:
 	{
-		Vec3 vEye = F::Freestand.GetViewPos();
-		Vec3 vHead = F::Freestand.GetHeadCenter();
-		Vec3 vDelta = vHead - vEye;
-		vDelta.z = 0.f;
-		flRealPitch = (vDelta.Length() > 0.1f) ? -89.f : 89.f;
+		flRealPitch = F::Freestand.GetSecurePitch(pLocal);
 		break;
 	}
 	}
@@ -288,11 +284,7 @@ float CAntiAim::GetPitch(float flCurPitch)
 	}
 	case Vars::AntiAim::PitchFakeEnum::Auto:
 	{
-		Vec3 vEye = F::Freestand.GetViewPos();
-		Vec3 vHead = F::Freestand.GetHeadCenter();
-		Vec3 vDelta = vHead - vEye;
-		vDelta.z = 0.f;
-		flFakePitch = (vDelta.Length() > 0.1f) ? -89.f : 89.f;
+		flFakePitch = F::Freestand.GetSecurePitch(pLocal);
 		break;
 	}
 	}
@@ -352,7 +344,7 @@ void CAntiAim::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 		F::Freestand.Run(pLocal, pCmd);
 
 	Vec2& vAngles = G::SendPacket ? vFakeAngles : vRealAngles;
-	vAngles.x = iAntiBackstab != 2 ? GetPitch(pCmd->viewangles.x) : pCmd->viewangles.x;
+	vAngles.x = iAntiBackstab != 2 ? GetPitch(pLocal, pCmd->viewangles.x) : pCmd->viewangles.x;
 	vAngles.y = !iAntiBackstab ? GetYaw(pLocal, pCmd, G::SendPacket) : pCmd->viewangles.y;
 
 	if (Vars::Misc::Game::AntiCheatCompatibility.Value)

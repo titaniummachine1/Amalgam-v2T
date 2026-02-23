@@ -73,6 +73,7 @@ public:
 	float GetSafestYaw() const { return m_flSafestYaw; }
 	float GetMostDangerousYaw() const { return m_flMostDangerousYaw; }
 	float SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHeadYaw);
+	float GetSecurePitch(CTFPlayer* pLocal);
 	void Reset();
 
 	void Render();

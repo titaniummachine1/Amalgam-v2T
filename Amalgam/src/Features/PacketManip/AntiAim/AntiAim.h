@@ -9,7 +9,7 @@ private:
 	float GetBaseYaw(CTFPlayer* pLocal, CUserCmd* pCmd, bool bFake);
 	void RunOverlapping(CTFPlayer* pEntity, CUserCmd* pCmd, float& flYaw, bool bFake, float flEpsilon = 45.f);
 	float GetYaw(CTFPlayer* pLocal, CUserCmd* pCmd, bool bFake);
-	float GetPitch(float flCurPitch);
+	float GetPitch(CTFPlayer* pLocal, float flCurPitch);
 	void MinWalk(CTFPlayer* pLocal, CUserCmd* pCmd);
 
 public:

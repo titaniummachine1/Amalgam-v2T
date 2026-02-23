@@ -182,6 +182,45 @@ float CFreestand::SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHea
 	return flBodyYaw;
 }
 
+float CFreestand::GetSecurePitch(CTFPlayer* pLocal)
+{
+	if (!pLocal)
+		return -89.f;
+
+	matrix3x4 tempBones[MAXSTUDIOBONES];
+	const float flOriginalPitch = pLocal->m_angEyeAnglesX();
+	const Vec3 vBodyCenter = pLocal->m_vecOrigin();
+
+	pLocal->m_angEyeAnglesX() = -89.f;
+	const bool bUpSuccess = pLocal->SetupBones(tempBones, MAXSTUDIOBONES, BONE_USED_BY_ANYTHING, I::GlobalVars->curtime);
+	const Vec3 vHeadCenterUp = bUpSuccess ? GetHeadCenterFromBones(tempBones) : Vec3();
+	pLocal->m_angEyeAnglesX() = flOriginalPitch;
+
+	pLocal->m_angEyeAnglesX() = 89.f;
+	const bool bDownSuccess = pLocal->SetupBones(tempBones, MAXSTUDIOBONES, BONE_USED_BY_ANYTHING, I::GlobalVars->curtime);
+	const Vec3 vHeadCenterDown = bDownSuccess ? GetHeadCenterFromBones(tempBones) : Vec3();
+	pLocal->m_angEyeAnglesX() = flOriginalPitch;
+
+	if (!bUpSuccess && !bDownSuccess)
+		return -89.f;
+
+	if (!bUpSuccess)
+		return 89.f;
+
+	if (!bDownSuccess)
+		return -89.f;
+
+	Vec3 vOffsetUp = vHeadCenterUp - vBodyCenter;
+	vOffsetUp.z = 0.f;
+	const float flOffsetUpDist = vOffsetUp.Length();
+
+	Vec3 vOffsetDown = vHeadCenterDown - vBodyCenter;
+	vOffsetDown.z = 0.f;
+	const float flOffsetDownDist = vOffsetDown.Length();
+
+	return (flOffsetUpDist > flOffsetDownDist) ? -89.f : 89.f;
+}
+
 void CFreestand::SampleThreats(CTFPlayer* pLocal)
 {
 	if (!m_bBonesSetup) return;
@@ -513,7 +552,15 @@ void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd)
 	if (!m_vThreats.empty())
 		RefineHeatmap(pLocal);
 
-	m_bHasSafeYaw = (m_vThreats.empty() || GetNormalizedSafety(m_flSafestYaw, static_cast<int>(360.f / flDegreesPerSegment)) >= 0.99f);
+	if (m_vThreats.empty())
+	{
+		m_bHasSafeYaw = false;
+	}
+	else
+	{
+		const float flBestSafety = GetNormalizedSafety(m_flSafestYaw, static_cast<int>(360.f / flDegreesPerSegment));
+		m_bHasSafeYaw = (flBestSafety >= 0.99f);
+	}
 }
 
 void CFreestand::Render()
@@ -521,7 +568,7 @@ void CFreestand::Render()
 	if (!Vars::AntiAim::FreestandVisuals.Value)
 		return;
 
-	if (m_vHeatmap.empty())
+	if (m_vHeatmap.empty() || m_vThreats.empty())
 		return;
 
 	auto pLocal = H::Entities.GetLocal();

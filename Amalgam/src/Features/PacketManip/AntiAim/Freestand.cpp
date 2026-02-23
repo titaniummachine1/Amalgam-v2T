@@ -123,22 +123,23 @@ bool CFreestand::SetupBonesForYaw(CTFPlayer* pLocal, float flBodyYaw, matrix3x4*
 	if (!pAnimState)
 		return false;
 
-	const float flOriginalYaw = pLocal->m_angEyeAnglesY();
-	const float flOriginalFeetYaw = pAnimState->m_flCurrentFeetYaw;
-	const int iOriginalEffects = pLocal->m_fEffects();
+	const float flOldFrameTime = I::GlobalVars->frametime;
+	const int nOldSequence = pLocal->m_nSequence();
+	const float flOldCycle = pLocal->m_flCycle();
+	const auto pOldPoseParams = pLocal->m_flPoseParameter();
+	char pOldAnimState[sizeof(CTFPlayerAnimState)];
+	memcpy(pOldAnimState, pAnimState, sizeof(CTFPlayerAnimState));
 
-	pLocal->m_angEyeAnglesY() = flBodyYaw;
-	pAnimState->m_flCurrentFeetYaw = flBodyYaw;
-	pAnimState->Update(flBodyYaw, pLocal->m_angEyeAnglesX());
-	
-	pLocal->m_fEffects() |= 0x0010;
+	I::GlobalVars->frametime = 0.f;
+	pAnimState->Update(pAnimState->m_flCurrentFeetYaw = flBodyYaw, pLocal->m_angEyeAnglesX());
 	pLocal->InvalidateBoneCache();
-
 	const bool bSuccess = pLocal->SetupBones(pBonesOut, MAXSTUDIOBONES, BONE_USED_BY_ANYTHING, I::GlobalVars->curtime);
 
-	pLocal->m_angEyeAnglesY() = flOriginalYaw;
-	pAnimState->m_flCurrentFeetYaw = flOriginalFeetYaw;
-	pLocal->m_fEffects() = iOriginalEffects;
+	I::GlobalVars->frametime = flOldFrameTime;
+	pLocal->m_nSequence() = nOldSequence;
+	pLocal->m_flCycle() = flOldCycle;
+	pLocal->m_flPoseParameter() = pOldPoseParams;
+	memcpy(pAnimState, pOldAnimState, sizeof(CTFPlayerAnimState));
 
 	return bSuccess;
 }
@@ -202,19 +203,37 @@ float CFreestand::GetSecurePitch(CTFPlayer* pLocal)
 	if (!pLocal)
 		return -89.f;
 
-	matrix3x4 tempBones[MAXSTUDIOBONES];
-	const float flOriginalPitch = pLocal->m_angEyeAnglesX();
-	const Vec3 vBodyCenter = pLocal->m_vecOrigin();
+	auto pAnimState = pLocal->m_PlayerAnimState();
+	if (!pAnimState)
+		return -89.f;
 
-	pLocal->m_angEyeAnglesX() = -89.f;
+	const Vec3 vBodyCenter = pLocal->m_vecOrigin();
+	matrix3x4 tempBones[MAXSTUDIOBONES];
+
+	const float flOldFrameTime = I::GlobalVars->frametime;
+	const int nOldSequence = pLocal->m_nSequence();
+	const float flOldCycle = pLocal->m_flCycle();
+	const auto pOldPoseParams = pLocal->m_flPoseParameter();
+	char pOldAnimState[sizeof(CTFPlayerAnimState)];
+	memcpy(pOldAnimState, pAnimState, sizeof(CTFPlayerAnimState));
+
+	I::GlobalVars->frametime = 0.f;
+	pAnimState->Update(pAnimState->m_flCurrentFeetYaw, -89.f);
+	pLocal->InvalidateBoneCache();
 	const bool bUpSuccess = pLocal->SetupBones(tempBones, MAXSTUDIOBONES, BONE_USED_BY_ANYTHING, I::GlobalVars->curtime);
 	const Vec3 vHeadCenterUp = bUpSuccess ? GetHeadCenterFromBones(tempBones) : Vec3();
-	pLocal->m_angEyeAnglesX() = flOriginalPitch;
 
-	pLocal->m_angEyeAnglesX() = 89.f;
+	memcpy(pAnimState, pOldAnimState, sizeof(CTFPlayerAnimState));
+	pAnimState->Update(pAnimState->m_flCurrentFeetYaw, 89.f);
+	pLocal->InvalidateBoneCache();
 	const bool bDownSuccess = pLocal->SetupBones(tempBones, MAXSTUDIOBONES, BONE_USED_BY_ANYTHING, I::GlobalVars->curtime);
 	const Vec3 vHeadCenterDown = bDownSuccess ? GetHeadCenterFromBones(tempBones) : Vec3();
-	pLocal->m_angEyeAnglesX() = flOriginalPitch;
+
+	I::GlobalVars->frametime = flOldFrameTime;
+	pLocal->m_nSequence() = nOldSequence;
+	pLocal->m_flCycle() = flOldCycle;
+	pLocal->m_flPoseParameter() = pOldPoseParams;
+	memcpy(pAnimState, pOldAnimState, sizeof(CTFPlayerAnimState));
 
 	if (!bUpSuccess && !bDownSuccess)
 		return -89.f;

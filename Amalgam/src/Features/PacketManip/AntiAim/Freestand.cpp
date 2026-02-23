@@ -486,7 +486,7 @@ void CFreestand::RefineHeatmap(CTFPlayer* pLocal)
 {
 	const int iMaxHits = static_cast<int>(m_vThreats.size()) * MULTIPOINT_CORNERS;
 
-	for (int iter = 0; iter < 5; iter++)
+	for (int iter = 0; iter < 10; iter++)
 	{
 		float flBestSafety = -1.f;
 		int iBestIdx = -1;
@@ -597,15 +597,7 @@ void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd)
 	if (!m_vThreats.empty())
 		RefineHeatmap(pLocal);
 
-	if (m_vThreats.empty())
-	{
-		m_bHasSafeYaw = false;
-	}
-	else
-	{
-		const float flBestSafety = GetNormalizedSafety(m_flSafestYaw, static_cast<int>(360.f / flDegreesPerSegment));
-		m_bHasSafeYaw = (flBestSafety >= 0.99f);
-	}
+	m_bHasSafeYaw = !m_vThreats.empty();
 }
 
 void CFreestand::Render()
@@ -645,13 +637,14 @@ void CFreestand::Render()
 		);
 	}
 
-	if (m_bHasSafeYaw)
+	if (!m_vThreats.empty())
 	{
 		Vec3 vCircleCenter = Vec3(m_vOrigin.x, m_vOrigin.y, m_vHeadCenter.z);
 		Vec3 vBestWorld = HeadPosForYaw(m_flSafestYaw);
+		Color_t tLineColor = m_bHasSafeYaw ? Color_t(0, 255, 0, 255) : Color_t(255, 165, 0, 255);
 		G::LineStorage.emplace_back(
 			std::pair<Vec3, Vec3>(vCircleCenter, vBestWorld),
-			flExpiry, Color_t(0, 255, 0, 255), false
+			flExpiry, tLineColor, false
 		);
 	}
 }

@@ -34,31 +34,45 @@ private:
 	matrix3x4 m_aBones[MAXSTUDIOBONES] = {};
 	bool m_bBonesSetup = false;
 	int m_iHeadBone = 0;
+	float m_flViewYaw = 0.f;
 
 	mutable std::unordered_map<int, float> m_mYawCorrectionCache = {};
 	Vec3 m_vPrevHeadCenter = {};
 
 	std::vector<FreestandThreat_t> m_vThreats = {};
+
+	static constexpr int MAX_HEATMAP_RESOLUTION = 720;
+	float m_aHeatmapThreat[MAX_HEATMAP_RESOLUTION] = {};
+	int m_aHeatmapContributions[MAX_HEATMAP_RESOLUTION] = {};
+
 	std::vector<HeatmapPoint_t> m_vHeatmap = {};
 
-	float m_flBestYaw = 0.f;
-	bool m_bHasResult = false;
+	float m_flSafestYaw = 0.f;
+	float m_flMostDangerousYaw = 0.f;
+	bool m_bHasSafeYaw = false;
 
-	float SolveBodyYawForHeadTarget(float flTargetHeadYaw) const;
+	bool SetupBonesForYaw(CTFPlayer* pLocal, float flBodyYaw, matrix3x4* pBonesOut);
+	Vec3 GetHeadCenterFromBones(const matrix3x4* pBones) const;
+	float SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHeadYaw);
 	void GatherThreats(CTFPlayer* pLocal);
 	void ComputeHeadCircle(CTFPlayer* pLocal);
 	Vec3 HeadPosForYaw(float flYaw) const;
-	void BuildHeatmap(int iSegments);
+	void ClearHeatmap(int iResolution);
+	void AccumulateThreatSample(float flYaw, float flThreatValue, int iResolution);
+	float GetNormalizedSafety(float flYaw, int iResolution) const;
+	void BuildHeatmap(float flDegreesPerSegment);
+	void BuildHeatmapVisualization(int iVisualSegments, float flDataDegreesPerSegment);
 	int MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& threat, float flTargetYaw);
 	void RefineHeatmap(CTFPlayer* pLocal);
 	void SampleThreats(CTFPlayer* pLocal);
 	float FindSafestYaw() const;
+	float FindMostDangerousYaw() const;
 
 public:
 	void Run(CTFPlayer* pLocal, CUserCmd* pCmd);
-	float GetFreestandYaw() const { return SolveBodyYawForHeadTarget(m_flBestYaw); }
-	float GetYawOffset(float flViewYaw) const;
-	bool HasResult() const { return m_bHasResult; }
+	bool HasSafeYaw() const { return m_bHasSafeYaw; }
+	float GetSafestYaw() const { return m_flSafestYaw; }
+	float GetMostDangerousYaw() const { return m_flMostDangerousYaw; }
 	void Reset();
 
 	void Render();

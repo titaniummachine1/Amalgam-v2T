@@ -94,6 +94,7 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 		m_flHeadRadius = 10.f;
 
 	m_flCurrentBodyYaw = pLocal->m_angEyeAnglesY();
+	m_flViewYaw = m_flCurrentBodyYaw;
 	if (vHorizontalDelta.Length() > 0.1f)
 	{
 		float flHeadWorldYaw = RAD2DEG(atan2f(vHorizontalDelta.y, vHorizontalDelta.x));
@@ -112,6 +113,28 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 	}
 }
 
+bool CFreestand::SetupBonesForYaw(CTFPlayer* pLocal, float flBodyYaw, matrix3x4* pBonesOut)
+{
+	if (!pLocal || !pBonesOut)
+		return false;
+
+	const float flOriginalYaw = pLocal->m_angEyeAnglesY();
+	pLocal->m_angEyeAnglesY() = flBodyYaw;
+
+	const bool bSuccess = pLocal->SetupBones(pBonesOut, MAXSTUDIOBONES, BONE_USED_BY_ANYTHING, pLocal->m_flSimulationTime());
+
+	pLocal->m_angEyeAnglesY() = flOriginalYaw;
+	return bSuccess;
+}
+
+Vec3 CFreestand::GetHeadCenterFromBones(const matrix3x4* pBones) const
+{
+	if (!pBones || m_iHeadBone < 0)
+		return Vec3();
+
+	return Vec3(pBones[m_iHeadBone][0][3], pBones[m_iHeadBone][1][3], pBones[m_iHeadBone][2][3]);
+}
+
 Vec3 CFreestand::HeadPosForYaw(float flYaw) const
 {
 	float flRad = DEG2RAD(flYaw);
@@ -119,41 +142,33 @@ Vec3 CFreestand::HeadPosForYaw(float flYaw) const
 	return vCenter + Vec3(cosf(flRad) * m_flHeadRadius, sinf(flRad) * m_flHeadRadius, 0.f);
 }
 
-float CFreestand::SolveBodyYawForHeadTarget(float flTargetHeadYaw) const
+float CFreestand::SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHeadYaw)
 {
+	if (!pLocal)
+		return flTargetHeadYaw;
+
 	const int iCacheKey = static_cast<int>(Math::NormalizeAngle(flTargetHeadYaw) + 360.f) % 360;
 	const auto it = m_mYawCorrectionCache.find(iCacheKey);
 	if (it != m_mYawCorrectionCache.end())
 		return it->second;
 
-	const int iBone = m_iHeadBone;
-
 	float flBodyYaw = Math::NormalizeAngle(flTargetHeadYaw - m_flHeadYawOffset);
 
-	for (int iter = 0; iter < 8; iter++)
+	matrix3x4 tempBones[MAXSTUDIOBONES];
+	for (int iter = 0; iter < 3; iter++)
 	{
-		const float flRotationYaw = Math::NormalizeAngle(flBodyYaw - m_flCurrentBodyYaw);
+		if (!SetupBonesForYaw(pLocal, flBodyYaw, tempBones))
+			break;
 
-		matrix3x4 matRotation;
-		Math::AngleMatrix({ 0.f, flRotationYaw, 0.f }, matRotation);
-
-		matrix3x4 matBone;
-		memcpy(matBone, m_aBones[iBone], sizeof(matrix3x4));
-		matBone[0][3] -= m_vOrigin.x;
-		matBone[1][3] -= m_vOrigin.y;
-		matBone[2][3] -= m_vOrigin.z;
-
-		matrix3x4 matRotatedBone;
-		Math::ConcatTransforms(matRotation, matBone, matRotatedBone);
-
-		matRotatedBone[0][3] += m_vOrigin.x;
-		matRotatedBone[1][3] += m_vOrigin.y;
-		matRotatedBone[2][3] += m_vOrigin.z;
+		const Vec3 vActualHeadCenter = GetHeadCenterFromBones(tempBones);
+		if (vActualHeadCenter.IsZero())
+			break;
 
 		const float flActualHeadYaw = RAD2DEG(atan2f(
-			matRotatedBone[1][3] - m_vOrigin.y,
-			matRotatedBone[0][3] - m_vOrigin.x
+			vActualHeadCenter.y - m_vOrigin.y,
+			vActualHeadCenter.x - m_vOrigin.x
 		));
+
 		const float flError = Math::NormalizeAngle(flTargetHeadYaw - flActualHeadYaw);
 
 		if (fabsf(flError) < 1.f)
@@ -197,29 +212,19 @@ void CFreestand::SampleThreats(CTFPlayer* pLocal)
 		Vec3( flHalfX,  flHalfY, -flHalfZ)
 	};
 
+	matrix3x4 tempBones[MAXSTUDIOBONES];
 	for (auto& threat : m_vThreats)
 	{
 		for (int s = 0; s < 4; s++)
 		{
 			const float flSampleYaw = threat.m_flDirToLocal + SAMPLE_OFFSETS[s];
-			const float flBodyYaw = SolveBodyYawForHeadTarget(flSampleYaw);
-			const float flRotationYaw = Math::NormalizeAngle(flBodyYaw - m_flCurrentBodyYaw);
+			const float flBodyYaw = SolveBodyYawForHeadTarget(pLocal, flSampleYaw);
 
-			matrix3x4 matRotation;
-			Math::AngleMatrix({ 0.f, flRotationYaw, 0.f }, matRotation);
-
-			matrix3x4 matBone;
-			memcpy(matBone, m_aBones[iBone], sizeof(matrix3x4));
-			matBone[0][3] -= m_vOrigin.x;
-			matBone[1][3] -= m_vOrigin.y;
-			matBone[2][3] -= m_vOrigin.z;
-
-			matrix3x4 matRotatedBone;
-			Math::ConcatTransforms(matRotation, matBone, matRotatedBone);
-
-			matRotatedBone[0][3] += m_vOrigin.x;
-			matRotatedBone[1][3] += m_vOrigin.y;
-			matRotatedBone[2][3] += m_vOrigin.z;
+			if (!SetupBonesForYaw(pLocal, flBodyYaw, tempBones))
+			{
+				threat.m_bSampleHit[s] = false;
+				continue;
+			}
 
 			CTraceFilterHitscan filter(pLocal);
 			filter.m_pSkip = threat.m_pPlayer;
@@ -228,7 +233,7 @@ void CFreestand::SampleThreats(CTFPlayer* pLocal)
 			for (int c = 0; c < MULTIPOINT_CORNERS; c++)
 			{
 				Vec3 vWorld;
-				Math::VectorTransform(vLocalCorners[c], matRotatedBone, vWorld);
+				Math::VectorTransform(vLocalCorners[c], tempBones[iBone], vWorld);
 
 				CGameTrace trace = {};
 				SDK::Trace(threat.m_vEyePos, vWorld, MASK_SHOT | CONTENTS_GRATE, &filter, &trace);
@@ -245,60 +250,89 @@ void CFreestand::SampleThreats(CTFPlayer* pLocal)
 	}
 }
 
-static float AngleDiff(float a, float b)
+void CFreestand::ClearHeatmap(int iResolution)
 {
-	float d = fmodf(a - b + 540.f, 360.f) - 180.f;
-	return fabsf(d);
+	const int iSize = std::min(iResolution, MAX_HEATMAP_RESOLUTION);
+	memset(m_aHeatmapThreat, 0, sizeof(float) * iSize);
+	memset(m_aHeatmapContributions, 0, sizeof(int) * iSize);
 }
 
-void CFreestand::BuildHeatmap(int iSegments)
+void CFreestand::AccumulateThreatSample(float flYaw, float flThreatValue, int iResolution)
+{
+	const int iSize = std::min(iResolution, MAX_HEATMAP_RESOLUTION);
+	const float flStep = 360.f / static_cast<float>(iSize);
+
+	for (int i = 0; i < iSize; i++)
+	{
+		const float flSegmentYaw = -180.f + flStep * static_cast<float>(i);
+		const float flDiff = Math::NormalizeAngle(flYaw - flSegmentYaw);
+		const float flDist = fabsf(flDiff);
+		const float flNorm = flDist / 180.f;
+		const float flInterpolatedThreat = flThreatValue * (1.f - flNorm);
+
+		m_aHeatmapThreat[i] += flInterpolatedThreat;
+		m_aHeatmapContributions[i]++;
+	}
+}
+
+float CFreestand::GetNormalizedSafety(float flYaw, int iResolution) const
+{
+	const int iSize = std::min(iResolution, MAX_HEATMAP_RESOLUTION);
+	const float flStep = 360.f / static_cast<float>(iSize);
+	const float flNormYaw = Math::NormalizeAngle(flYaw) + 180.f;
+	const float flIndex = flNormYaw / flStep;
+	const int iIndex0 = static_cast<int>(floorf(flIndex)) % iSize;
+	const int iIndex1 = (iIndex0 + 1) % iSize;
+	const float flFrac = flIndex - floorf(flIndex);
+
+	const float flThreat0 = m_aHeatmapContributions[iIndex0] > 0 
+		? m_aHeatmapThreat[iIndex0] / static_cast<float>(m_aHeatmapContributions[iIndex0]) 
+		: 0.f;
+	const float flThreat1 = m_aHeatmapContributions[iIndex1] > 0 
+		? m_aHeatmapThreat[iIndex1] / static_cast<float>(m_aHeatmapContributions[iIndex1]) 
+		: 0.f;
+
+	const float flInterpolatedThreat = flThreat0 * (1.f - flFrac) + flThreat1 * flFrac;
+	return 1.f - std::clamp(flInterpolatedThreat, 0.f, 1.f);
+}
+
+void CFreestand::BuildHeatmap(int iResolution)
+{
+	ClearHeatmap(iResolution);
+
+	if (m_vThreats.empty())
+		return;
+
+	for (const auto& threat : m_vThreats)
+	{
+		for (int s = 0; s < 4; s++)
+		{
+			if (threat.m_bSampleHit[s])
+			{
+				const float flSampleYaw = threat.m_flDirToLocal + SAMPLE_OFFSETS[s];
+				AccumulateThreatSample(flSampleYaw, 1.f, iResolution);
+			}
+		}
+	}
+}
+
+void CFreestand::BuildHeatmapVisualization(int iVisualSegments, int iDataResolution)
 {
 	m_vHeatmap.clear();
-	m_vHeatmap.reserve(iSegments);
+	m_vHeatmap.reserve(iVisualSegments);
 
-	const float flStep = 360.f / static_cast<float>(iSegments);
+	const float flStep = 360.f / static_cast<float>(iVisualSegments);
 
-	for (int i = 0; i < iSegments; i++)
+	for (int i = 0; i < iVisualSegments; i++)
 	{
-		float flYaw = -180.f + flStep * static_cast<float>(i);
+		const float flYaw = -180.f + flStep * static_cast<float>(i);
 
 		HeatmapPoint_t point;
 		point.m_flYawAngle = flYaw;
 		point.m_vHeadPos = HeadPosForYaw(flYaw);
+		point.m_flSafety = GetNormalizedSafety(flYaw, iDataResolution);
 		point.m_iHitsOut8 = -1;
 		point.m_bVerified = false;
-
-		if (m_vThreats.empty())
-		{
-			point.m_flSafety = 1.f;
-		}
-		else
-		{
-			float flTotalThreat = 0.f;
-			int iTotalHitSamples = 0;
-
-			for (const auto& threat : m_vThreats)
-			{
-				for (int s = 0; s < 4; s++)
-				{
-					if (threat.m_bSampleHit[s])
-					{
-						float flSampleYaw = threat.m_flDirToLocal + SAMPLE_OFFSETS[s];
-						float flDiff = AngleDiff(flYaw, flSampleYaw);
-						float flNorm = flDiff / 180.f;
-						float flThreat = 1.f - flNorm;
-						
-						flTotalThreat += flThreat;
-						iTotalHitSamples++;
-					}
-				}
-			}
-			
-			if (iTotalHitSamples > 0)
-				point.m_flSafety = 1.f - std::clamp(flTotalThreat / static_cast<float>(iTotalHitSamples), 0.f, 1.f);
-			else
-				point.m_flSafety = 1.f;
-		}
 
 		m_vHeatmap.push_back(point);
 	}
@@ -317,34 +351,21 @@ int CFreestand::MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& thre
 	auto pBox = pSet->pHitbox(HEAD_HITBOX);
 	if (!pBox) return 0;
 
-	Vec3 vMins = pBox->bbmin;
-	Vec3 vMaxs = pBox->bbmax;
-	int iBone = pBox->bone;
+	const Vec3 vMins = pBox->bbmin;
+	const Vec3 vMaxs = pBox->bbmax;
+	const int iBone = pBox->bone;
 
-	const float flBodyYaw = SolveBodyYawForHeadTarget(flTargetYaw);
-	const float flRotationYaw = Math::NormalizeAngle(flBodyYaw - m_flCurrentBodyYaw);
+	const float flBodyYaw = SolveBodyYawForHeadTarget(pLocal, flTargetYaw);
 
-	matrix3x4 matRotation;
-	Math::AngleMatrix({ 0.f, flRotationYaw, 0.f }, matRotation);
+	matrix3x4 tempBones[MAXSTUDIOBONES];
+	if (!SetupBonesForYaw(pLocal, flBodyYaw, tempBones))
+		return 0;
 
-	matrix3x4 matBone;
-	memcpy(matBone, m_aBones[iBone], sizeof(matrix3x4));
-	matBone[0][3] -= m_vOrigin.x;
-	matBone[1][3] -= m_vOrigin.y;
-	matBone[2][3] -= m_vOrigin.z;
+	const float flHalfX = (vMaxs.x - vMins.x) * 0.5f;
+	const float flHalfY = (vMaxs.y - vMins.y) * 0.5f;
+	const float flHalfZ = (vMaxs.z - vMins.z) * 0.5f;
 
-	matrix3x4 matRotatedBone;
-	Math::ConcatTransforms(matRotation, matBone, matRotatedBone);
-
-	matRotatedBone[0][3] += m_vOrigin.x;
-	matRotatedBone[1][3] += m_vOrigin.y;
-	matRotatedBone[2][3] += m_vOrigin.z;
-
-	float flHalfX = (vMaxs.x - vMins.x) * 0.5f;
-	float flHalfY = (vMaxs.y - vMins.y) * 0.5f;
-	float flHalfZ = (vMaxs.z - vMins.z) * 0.5f;
-
-	Vec3 vLocalCorners[MULTIPOINT_CORNERS] = {
+	const Vec3 vLocalCorners[MULTIPOINT_CORNERS] = {
 		Vec3(-flHalfX, -flHalfY,  flHalfZ),
 		Vec3( flHalfX, -flHalfY,  flHalfZ),
 		Vec3(-flHalfX,  flHalfY,  flHalfZ),
@@ -362,7 +383,7 @@ int CFreestand::MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& thre
 	for (int c = 0; c < MULTIPOINT_CORNERS; c++)
 	{
 		Vec3 vWorld;
-		Math::VectorTransform(vLocalCorners[c], matRotatedBone, vWorld);
+		Math::VectorTransform(vLocalCorners[c], tempBones[iBone], vWorld);
 
 		CGameTrace trace = {};
 		SDK::Trace(threat.m_vEyePos, vWorld, MASK_SHOT | CONTENTS_GRATE, &filter, &trace);
@@ -415,19 +436,48 @@ void CFreestand::RefineHeatmap(CTFPlayer* pLocal)
 
 float CFreestand::FindSafestYaw() const
 {
+	const int iResolution = Vars::AntiAim::FreestandHeatmapResolution.Value;
+	const float flStep = 360.f / static_cast<float>(iResolution);
+
 	float flBestSafety = -1.f;
 	float flBestYaw = 0.f;
 
-	for (const auto& point : m_vHeatmap)
+	for (int i = 0; i < iResolution; i++)
 	{
-		if (point.m_flSafety > flBestSafety)
+		const float flYaw = -180.f + flStep * static_cast<float>(i);
+		const float flSafety = GetNormalizedSafety(flYaw, iResolution);
+
+		if (flSafety > flBestSafety)
 		{
-			flBestSafety = point.m_flSafety;
-			flBestYaw = point.m_flYawAngle;
+			flBestSafety = flSafety;
+			flBestYaw = flYaw;
 		}
 	}
 
 	return flBestYaw;
+}
+
+float CFreestand::FindMostDangerousYaw() const
+{
+	const int iResolution = Vars::AntiAim::FreestandHeatmapResolution.Value;
+	const float flStep = 360.f / static_cast<float>(iResolution);
+
+	float flWorstSafety = 2.f;
+	float flWorstYaw = 0.f;
+
+	for (int i = 0; i < iResolution; i++)
+	{
+		const float flYaw = -180.f + flStep * static_cast<float>(i);
+		const float flSafety = GetNormalizedSafety(flYaw, iResolution);
+
+		if (flSafety < flWorstSafety)
+		{
+			flWorstSafety = flSafety;
+			flWorstYaw = flYaw;
+		}
+	}
+
+	return flWorstYaw;
 }
 
 void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd)
@@ -446,22 +496,27 @@ void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd)
 	if (!m_vThreats.empty())
 		SampleThreats(pLocal);
 
-	const int iSegments = Vars::AntiAim::FreestandSegments.Value;
-	BuildHeatmap(iSegments);
+	const int iHeatmapResolution = Vars::AntiAim::FreestandHeatmapResolution.Value;
+	BuildHeatmap(iHeatmapResolution);
+
+	m_flBestYaw = FindSafestYaw();
+	m_flWorstYaw = FindMostDangerousYaw();
+
+	const int iVisualSegments = Vars::AntiAim::FreestandSegments.Value;
+	BuildHeatmapVisualization(iVisualSegments, iHeatmapResolution);
 
 	if (!m_vThreats.empty())
 		RefineHeatmap(pLocal);
 
-	m_flBestYaw = FindSafestYaw();
 	m_bHasResult = true;
 }
 
-float CFreestand::GetYawOffset(float flViewYaw) const
+float CFreestand::GetYawOffset(CTFPlayer* pLocal, float flViewYaw)
 {
-	if (!m_bHasResult)
+	if (!m_bHasResult || !pLocal)
 		return 180.f;
 
-	const float flBodyYaw = SolveBodyYawForHeadTarget(m_flBestYaw);
+	const float flBodyYaw = SolveBodyYawForHeadTarget(pLocal, m_flBestYaw);
 	return Math::NormalizeAngle(flBodyYaw - flViewYaw);
 }
 

@@ -159,9 +159,11 @@ float CAntiAim::GetYawOffset(CTFPlayer* pEntity, bool bFake)
 		if (bFake)
 			return 0.f;
 		if (F::Freestand.HasResult())
-			return F::Freestand.GetYawOffset(I::EngineClient->GetViewAngles().y);
+			return F::Freestand.GetYawOffset(pEntity->As<CTFPlayer>(), I::EngineClient->GetViewAngles().y);
 		return 180.f;
 	}
+	case Vars::AntiAim::YawEnum::FreestandUnsafe:
+		return 0.f;
 	}
 	return 0.f;
 }
@@ -211,9 +213,16 @@ void CAntiAim::RunOverlapping(CTFPlayer* pEntity, CUserCmd* pCmd, float& flYaw, 
 float CAntiAim::GetYaw(CTFPlayer* pLocal, CUserCmd* pCmd, bool bFake)
 {
 	const int iMode = bFake ? Vars::AntiAim::YawFake.Value : Vars::AntiAim::YawReal.Value;
-	if (!bFake && iMode == Vars::AntiAim::YawEnum::Freestand && F::Freestand.HasResult())
+	if (iMode == Vars::AntiAim::YawEnum::Freestand && !bFake && F::Freestand.HasResult())
 	{
-		float flYaw = F::Freestand.GetFreestandYaw();
+		float flYaw = F::Freestand.GetFreestandYaw(pLocal);
+		RunOverlapping(pLocal, pCmd, flYaw, bFake);
+		return flYaw;
+	}
+
+	if (iMode == Vars::AntiAim::YawEnum::FreestandUnsafe && F::Freestand.HasResult())
+	{
+		float flYaw = F::Freestand.GetFakeYaw(pLocal);
 		RunOverlapping(pLocal, pCmd, flYaw, bFake);
 		return flYaw;
 	}
@@ -343,10 +352,13 @@ void CAntiAim::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 
 	vEdgeTrace.clear();
 
-	if (Vars::AntiAim::YawReal.Value == Vars::AntiAim::YawEnum::Freestand
+	const bool bNeedsFreestand = Vars::AntiAim::YawReal.Value == Vars::AntiAim::YawEnum::Freestand
+		|| Vars::AntiAim::YawReal.Value == Vars::AntiAim::YawEnum::FreestandUnsafe
 		|| Vars::AntiAim::YawFake.Value == Vars::AntiAim::YawEnum::Freestand
+		|| Vars::AntiAim::YawFake.Value == Vars::AntiAim::YawEnum::FreestandUnsafe
 		|| Vars::AntiAim::PitchReal.Value == Vars::AntiAim::PitchRealEnum::Auto
-		|| Vars::AntiAim::PitchFake.Value == Vars::AntiAim::PitchFakeEnum::Auto)
+		|| Vars::AntiAim::PitchFake.Value == Vars::AntiAim::PitchFakeEnum::Auto;
+	if (bNeedsFreestand)
 		F::Freestand.Run(pLocal, pCmd);
 
 	Vec2& vAngles = G::SendPacket ? vFakeAngles : vRealAngles;

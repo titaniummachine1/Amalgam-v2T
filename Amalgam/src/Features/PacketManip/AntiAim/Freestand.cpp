@@ -240,14 +240,9 @@ float CFreestand::SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHea
 	if (!pLocal)
 		return flTargetHeadYaw;
 
-	const int iCacheKey = static_cast<int>(Math::NormalizeAngle(flTargetHeadYaw) + 360.f) % 360;
-	const auto it = m_mYawCorrectionCache.find(iCacheKey);
-	if (it != m_mYawCorrectionCache.end())
-		return it->second;
-
-	float flBodyYaw = Math::NormalizeAngle(flTargetHeadYaw - m_flHeadYawOffset);
-
+	float flBodyYaw = flTargetHeadYaw;
 	matrix3x4 tempBones[MAXSTUDIOBONES];
+	
 	for (int iter = 0; iter < 32; iter++)
 	{
 		if (!SetupBonesForYaw(pLocal, flBodyYaw, tempBones))
@@ -269,8 +264,7 @@ float CFreestand::SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHea
 
 		flBodyYaw = Math::NormalizeAngle(flBodyYaw + flError);
 	}
-
-	m_mYawCorrectionCache[iCacheKey] = flBodyYaw;
+	
 	return flBodyYaw;
 }
 
@@ -815,9 +809,10 @@ void CFreestand::Render()
 		);
 	}
 
+	Vec3 vCircleCenter = Vec3(m_vOrigin.x, m_vOrigin.y, m_vHeadCenter.z);
+	
 	if (!m_vThreats.empty())
 	{
-		Vec3 vCircleCenter = Vec3(m_vOrigin.x, m_vOrigin.y, m_vHeadCenter.z);
 		Vec3 vBestWorld = HeadPosForYaw(m_flSafestYaw);
 		Color_t tLineColor = m_bHasSafeYaw ? Color_t(0, 255, 0, 255) : Color_t(255, 165, 0, 255);
 		G::LineStorage.emplace_back(
@@ -825,4 +820,15 @@ void CFreestand::Render()
 			flExpiry, tLineColor, false
 		);
 	}
+	
+	Vec3 vViewYawWorld = HeadPosForYaw(m_flViewYaw);
+	G::LineStorage.emplace_back(
+		std::pair<Vec3, Vec3>(vCircleCenter, vViewYawWorld),
+		flExpiry, Color_t(255, 0, 255, 255), false
+	);
+	
+	G::LineStorage.emplace_back(
+		std::pair<Vec3, Vec3>(vCircleCenter, m_vHeadCenter),
+		flExpiry, Color_t(255, 0, 0, 255), false
+	);
 }

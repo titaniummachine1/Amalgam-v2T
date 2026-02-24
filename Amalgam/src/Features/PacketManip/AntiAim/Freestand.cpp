@@ -16,6 +16,7 @@ void CFreestand::Reset()
 	m_flSafestYaw = 0.f;
 	m_flMostDangerousYaw = 0.f;
 	m_bHasSafeYaw = false;
+	m_bSafestIsBodyBlocked = false;
 	
 	memset(m_aHeatmapThreat, 0, sizeof(m_aHeatmapThreat));
 	m_iTotalShotsAdded = 0;
@@ -748,6 +749,26 @@ void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd)
 				break;
 			}
 		}
+		
+		if (m_bHasSafeYaw)
+		{
+			matrix3x4 tempBones[MAXSTUDIOBONES];
+			const float flBodyYaw = SolveBodyYawForHeadTarget(pLocal, m_flSafestYaw);
+			if (SetupBonesForYaw(pLocal, flBodyYaw, tempBones))
+			{
+				bool bAnyBodyBlock = false;
+				for (const auto& threat : m_vThreats)
+				{
+					const int iHits = MultipointCheck(pLocal, threat, m_flSafestYaw);
+					if (iHits == 0)
+					{
+						bAnyBodyBlock = true;
+						break;
+					}
+				}
+				m_bSafestIsBodyBlocked = bAnyBodyBlock;
+			}
+		}
 	}
 }
 
@@ -793,7 +814,13 @@ void CFreestand::Render()
 	if (!m_vThreats.empty())
 	{
 		Vec3 vBestWorld = HeadPosForYaw(m_flSafestYaw);
-		Color_t tLineColor = m_bHasSafeYaw ? Color_t(0, 255, 0, 255) : Color_t(255, 165, 0, 255);
+		Color_t tLineColor;
+		if (m_bHasSafeYaw && m_bSafestIsBodyBlocked)
+			tLineColor = Color_t(255, 165, 0, 255);
+		else if (m_bHasSafeYaw)
+			tLineColor = Color_t(0, 255, 0, 255);
+		else
+			tLineColor = Color_t(255, 165, 0, 255);
 		G::LineStorage.emplace_back(
 			std::pair<Vec3, Vec3>(vCircleCenter, vBestWorld),
 			flExpiry, tLineColor, false

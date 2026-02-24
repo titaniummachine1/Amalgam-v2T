@@ -52,9 +52,6 @@ void CFreestand::GatherThreats(CTFPlayer* pLocal)
 		const float flLen = vDelta.Length();
 		threat.m_flDirToLocal = (flLen > 1.f) ? RAD2DEG(atan2f(vDelta.y, vDelta.x)) : 0.f;
 
-		for (int s = 0; s < 4; s++)
-			threat.m_bSampleHit[s] = false;
-
 		m_vThreats.push_back(threat);
 	}
 }

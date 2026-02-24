@@ -204,21 +204,10 @@ float CAntiAim::GetYaw(CTFPlayer* pLocal, CUserCmd* pCmd, bool bFake)
 {
 	float flYaw = GetBaseYaw(pLocal, pCmd, bFake) + GetYawOffset(pLocal, bFake);
 
-	if (Vars::AntiAim::FreestandEnabled.Value && F::Freestand.HasSafeYaw())
+	if (Vars::AntiAim::FreestandEnabled.Value && F::Freestand.HasSafeYaw() && !bFake)
 	{
-		if (!bFake)
-		{
-			const float flSafeYaw = F::Freestand.GetSafestYaw();
-			flYaw = F::Freestand.SolveBodyYawForHeadTarget(pLocal, flSafeYaw);
-		}
-		else if (Vars::AntiAim::FreestandOverrideFake.Value)
-		{
-			if (Vars::AntiAim::FreestandFakeYawMode.Value == Vars::AntiAim::FreestandFakeModeEnum::MostDangerous)
-			{
-				const float flDangerousYaw = F::Freestand.GetMostDangerousYaw();
-				flYaw = F::Freestand.SolveBodyYawForHeadTarget(pLocal, flDangerousYaw);
-			}
-		}
+		const float flSafeYaw = F::Freestand.GetSafestYaw();
+		flYaw = F::Freestand.SolveBodyYawForHeadTarget(pLocal, flSafeYaw);
 	}
 
 	RunOverlapping(pLocal, pCmd, flYaw, bFake);
@@ -284,7 +273,7 @@ float CAntiAim::GetPitch(CTFPlayer* pLocal, float flCurPitch)
 	}
 	case Vars::AntiAim::PitchFakeEnum::Auto:
 	{
-		flFakePitch = F::Freestand.GetSecurePitch(pLocal);
+		flFakePitch = -89.f;
 		break;
 	}
 	}

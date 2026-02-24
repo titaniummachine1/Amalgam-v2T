@@ -7,7 +7,7 @@ struct FreestandThreat_t
 	CTFPlayer* m_pPlayer = nullptr;
 	Vec3 m_vEyePos = {};
 	float m_flDirToLocal = 0.f;
-	bool m_bSampleHit[4] = {};
+	std::vector<bool> m_bSampleHit = {};
 	int m_iHeadshotCount = 0;
 };
 

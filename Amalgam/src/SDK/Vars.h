@@ -545,11 +545,9 @@ namespace Vars
 		CVar(InvalidShootPitch, "Hide pitch on shot", false);
 		CVar(TauntSpin, "Taunt Spin", false);
 		CVar(FreestandEnabled, "Freestand enabled", false);
+		CVar(FreestandInitialSegments, "Freestand initial segments", 8, SLIDER_CLAMP, 4, 16);
+		CVar(FreestandIterations, "Freestand iterations", 16, SLIDER_CLAMP, 5, 32);
 		CVar(FreestandDegreesPerSegment, "Freestand degrees per segment", 0.5f, SLIDER_PRECISION, 0.1f, 2.0f, 0.05f);
-		CVar(FreestandOverrideFake, "Freestand override fake", false);
-		Enum(FreestandFakeMode, Normal, MostDangerous);
-		CVarValues(FreestandFakeYawMode, "Freestand fake mode", 0, NONE, nullptr,
-			"Normal", "Most Dangerous");
 		CVar(FreestandVisuals, "Freestand visuals", false, VISUAL);
 		CVar(FreestandSegments, "Freestand segments", 64, SLIDER_CLAMP, 8, 360);
 	NAMESPACE_END(AntiAim);

@@ -6,7 +6,6 @@ static constexpr int HEAD_HITBOX = 0;
 static constexpr int MULTIPOINT_CORNERS = 8;
 static constexpr int MAX_REFINE_ITERATIONS = 3;
 static constexpr float THREAT_MAX_DISTANCE = 4000.f;
-static constexpr float SAMPLE_OFFSETS[4] = { 0.f, 90.f, -90.f, 180.f };
 
 void CFreestand::Reset()
 {
@@ -363,11 +362,16 @@ void CFreestand::SampleThreats(CTFPlayer* pLocal)
 	};
 
 	matrix3x4 tempBones[MAXSTUDIOBONES];
+	const int iInitialSegments = Vars::AntiAim::FreestandInitialSegments.Value;
+	const float flSegmentStep = 360.f / static_cast<float>(iInitialSegments);
+	
 	for (auto& threat : m_vThreats)
 	{
-		for (int s = 0; s < 4; s++)
+		threat.m_bSampleHit.resize(iInitialSegments);
+		
+		for (int s = 0; s < iInitialSegments; s++)
 		{
-			const float flSampleYaw = threat.m_flDirToLocal + SAMPLE_OFFSETS[s];
+			const float flSampleYaw = threat.m_flDirToLocal + (flSegmentStep * static_cast<float>(s));
 			const float flBodyYaw = SolveBodyYawForHeadTarget(pLocal, flSampleYaw);
 
 			if (!SetupBonesForYaw(pLocal, flBodyYaw, tempBones))
@@ -518,13 +522,16 @@ void CFreestand::BuildHeatmap(float flDegreesPerSegment)
 	if (m_vThreats.empty())
 		return;
 
+	const int iInitialSegments = Vars::AntiAim::FreestandInitialSegments.Value;
+	const float flSegmentStep = 360.f / static_cast<float>(iInitialSegments);
+	
 	for (const auto& threat : m_vThreats)
 	{
-		for (int s = 0; s < 4; s++)
+		for (int s = 0; s < iInitialSegments && s < static_cast<int>(threat.m_bSampleHit.size()); s++)
 		{
 			if (threat.m_bSampleHit[s])
 			{
-				const float flSampleYaw = threat.m_flDirToLocal + SAMPLE_OFFSETS[s];
+				const float flSampleYaw = threat.m_flDirToLocal + (flSegmentStep * static_cast<float>(s));
 				AccumulateThreatSample(flSampleYaw, 1.f, iResolution);
 			}
 		}
@@ -642,7 +649,9 @@ void CFreestand::RefineHeatmap(CTFPlayer* pLocal)
 {
 	const int iMaxHits = static_cast<int>(m_vThreats.size()) * MULTIPOINT_CORNERS;
 
-	for (int iter = 0; iter < 10; iter++)
+	const int iMaxIterations = Vars::AntiAim::FreestandIterations.Value;
+	
+	for (int iter = 0; iter < iMaxIterations; iter++)
 	{
 		float flBestSafety = -1.f;
 		int iBestIdx = -1;

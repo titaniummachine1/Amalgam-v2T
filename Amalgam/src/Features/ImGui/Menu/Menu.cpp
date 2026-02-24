@@ -1330,22 +1330,18 @@ void CMenu::MenuHvH(int iTab)
 					FToggle(Vars::AntiAim::FreestandEnabled, FToggleEnum::Left);
 					PushTransparent(!Vars::AntiAim::FreestandEnabled.Value);
 					{
+						FSlider(Vars::AntiAim::FreestandInitialSegments, FSliderEnum::Left);
+						FSlider(Vars::AntiAim::FreestandIterations, FSliderEnum::Right);
 						FSlider(Vars::AntiAim::FreestandDegreesPerSegment, FSliderEnum::Left);
-						FToggle(Vars::AntiAim::FreestandOverrideFake, FToggleEnum::Right);
-						PushTransparent(!Vars::AntiAim::FreestandOverrideFake.Value);
+						FToggle(Vars::AntiAim::FreestandVisuals, FToggleEnum::Right);
+						PushTransparent(!Vars::AntiAim::FreestandVisuals.Value);
 						{
-							FDropdown(Vars::AntiAim::FreestandFakeYawMode, FDropdownEnum::Left);
+							FSlider(Vars::AntiAim::FreestandSegments, FSliderEnum::Left);
 						}
 						PopTransparent();
-						FToggle(Vars::AntiAim::FreestandVisuals, FToggleEnum::Left);
-						FSlider(Vars::AntiAim::FreestandSegments, FSliderEnum::Right);
 					}
 					PopTransparent();
 				} EndSection();
-			}
-			/* Column 2 */
-			TableNextColumn();
-			{
 				if (Section("Resolver", 8))
 				{
 					FToggle(Vars::Resolver::Enabled, FToggleEnum::Left);

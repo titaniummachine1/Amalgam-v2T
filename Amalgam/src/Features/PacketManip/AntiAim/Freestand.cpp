@@ -19,6 +19,7 @@ void CFreestand::Reset()
 	
 	memset(m_aHeatmapThreat, 0, sizeof(m_aHeatmapThreat));
 	m_iTotalShotsAdded = 0;
+	m_mYawCorrectionCache.clear();
 }
 
 void CFreestand::GatherThreats(CTFPlayer* pLocal)

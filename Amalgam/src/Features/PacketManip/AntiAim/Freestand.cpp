@@ -152,6 +152,79 @@ Vec3 CFreestand::GetHeadCenterFromBones(const matrix3x4* pBones) const
 	return Vec3(pBones[m_iHeadBone][0][3], pBones[m_iHeadBone][1][3], pBones[m_iHeadBone][2][3]);
 }
 
+float CFreestand::IntersectRayWithBox(const Vec3& vStart, const Vec3& vEnd, const Vec3& vMins, const Vec3& vMaxs, const matrix3x4& transform)
+{
+	Vec3 vBoxCorners[8];
+	vBoxCorners[0] = Vec3(vMins.x, vMins.y, vMins.z);
+	vBoxCorners[1] = Vec3(vMaxs.x, vMins.y, vMins.z);
+	vBoxCorners[2] = Vec3(vMins.x, vMaxs.y, vMins.z);
+	vBoxCorners[3] = Vec3(vMaxs.x, vMaxs.y, vMins.z);
+	vBoxCorners[4] = Vec3(vMins.x, vMins.y, vMaxs.z);
+	vBoxCorners[5] = Vec3(vMaxs.x, vMins.y, vMaxs.z);
+	vBoxCorners[6] = Vec3(vMins.x, vMaxs.y, vMaxs.z);
+	vBoxCorners[7] = Vec3(vMaxs.x, vMaxs.y, vMaxs.z);
+
+	Vec3 vWorldMins = Vec3(FLT_MAX, FLT_MAX, FLT_MAX);
+	Vec3 vWorldMaxs = Vec3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+
+	for (int i = 0; i < 8; i++)
+	{
+		Vec3 vWorld;
+		Math::VectorTransform(vBoxCorners[i], transform, vWorld);
+		
+		vWorldMins.x = std::min(vWorldMins.x, vWorld.x);
+		vWorldMins.y = std::min(vWorldMins.y, vWorld.y);
+		vWorldMins.z = std::min(vWorldMins.z, vWorld.z);
+		vWorldMaxs.x = std::max(vWorldMaxs.x, vWorld.x);
+		vWorldMaxs.y = std::max(vWorldMaxs.y, vWorld.y);
+		vWorldMaxs.z = std::max(vWorldMaxs.z, vWorld.z);
+	}
+
+	Vec3 vDir = vEnd - vStart;
+	float flLength = vDir.Length();
+	if (flLength < 0.001f)
+		return -1.f;
+
+	vDir /= flLength;
+
+	float tmin = 0.0f;
+	float tmax = flLength;
+
+	for (int i = 0; i < 3; i++)
+	{
+		float origin = i == 0 ? vStart.x : (i == 1 ? vStart.y : vStart.z);
+		float dir = i == 0 ? vDir.x : (i == 1 ? vDir.y : vDir.z);
+		float bmin = i == 0 ? vWorldMins.x : (i == 1 ? vWorldMins.y : vWorldMins.z);
+		float bmax = i == 0 ? vWorldMaxs.x : (i == 1 ? vWorldMaxs.y : vWorldMaxs.z);
+
+		if (fabsf(dir) < 0.0001f)
+		{
+			if (origin < bmin || origin > bmax)
+				return -1.f;
+		}
+		else
+		{
+			float t1 = (bmin - origin) / dir;
+			float t2 = (bmax - origin) / dir;
+
+			if (t1 > t2)
+			{
+				float temp = t1;
+				t1 = t2;
+				t2 = temp;
+			}
+
+			tmin = std::max(tmin, t1);
+			tmax = std::min(tmax, t2);
+
+			if (tmin > tmax)
+				return -1.f;
+		}
+	}
+
+	return tmin;
+}
+
 Vec3 CFreestand::HeadPosForYaw(float flYaw) const
 {
 	float flRad = DEG2RAD(flYaw);
@@ -302,6 +375,7 @@ void CFreestand::SampleThreats(CTFPlayer* pLocal)
 
 			CTraceFilterHitscan filter;
 			filter.m_pSkip = pLocal;
+			filter.m_iTeam = threat.m_pPlayer->m_iTeamNum();
 
 			Vec3 vHeadCenter;
 			Math::VectorTransform(Vec3(0, 0, 0), tempBones[iBone], vHeadCenter);
@@ -309,7 +383,33 @@ void CFreestand::SampleThreats(CTFPlayer* pLocal)
 			CGameTrace trace = {};
 			SDK::Trace(threat.m_vEyePos, vHeadCenter, MASK_SHOT | CONTENTS_GRATE, &filter, &trace);
 
-			if (trace.fraction >= 1.f)
+			bool bHitWorld = trace.fraction < 1.f;
+			bool bBlockedByBody = false;
+
+			if (!bHitWorld)
+			{
+				const float flDistToHead = (vHeadCenter - threat.m_vEyePos).Length();
+				float flClosestHit = FLT_MAX;
+
+				for (int h = 0; h < pSet->numhitboxes; h++)
+				{
+					if (h == HEAD_HITBOX)
+						continue;
+
+					auto pHitbox = pSet->pHitbox(h);
+					if (!pHitbox)
+						continue;
+
+					const float flDist = IntersectRayWithBox(threat.m_vEyePos, vHeadCenter, pHitbox->bbmin, pHitbox->bbmax, tempBones[pHitbox->bone]);
+					if (flDist >= 0.f && flDist < flClosestHit)
+						flClosestHit = flDist;
+				}
+
+				if (flClosestHit < flDistToHead)
+					bBlockedByBody = true;
+			}
+
+			if (!bHitWorld && !bBlockedByBody)
 			{
 				threat.m_bSampleHit[s] = true;
 				continue;
@@ -323,7 +423,33 @@ void CFreestand::SampleThreats(CTFPlayer* pLocal)
 
 				SDK::Trace(threat.m_vEyePos, vWorld, MASK_SHOT | CONTENTS_GRATE, &filter, &trace);
 
-				if (trace.fraction >= 1.f)
+				bHitWorld = trace.fraction < 1.f;
+				bBlockedByBody = false;
+
+				if (!bHitWorld)
+				{
+					const float flDistToCorner = (vWorld - threat.m_vEyePos).Length();
+					float flClosestHit = FLT_MAX;
+
+					for (int h = 0; h < pSet->numhitboxes; h++)
+					{
+						if (h == HEAD_HITBOX)
+							continue;
+
+						auto pHitbox = pSet->pHitbox(h);
+						if (!pHitbox)
+							continue;
+
+						const float flDist = IntersectRayWithBox(threat.m_vEyePos, vWorld, pHitbox->bbmin, pHitbox->bbmax, tempBones[pHitbox->bone]);
+						if (flDist >= 0.f && flDist < flClosestHit)
+							flClosestHit = flDist;
+					}
+
+					if (flClosestHit < flDistToCorner)
+						bBlockedByBody = true;
+				}
+
+				if (!bHitWorld && !bBlockedByBody)
 				{
 					bAnyCornerExposed = true;
 					break;
@@ -435,12 +561,12 @@ int CFreestand::MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& thre
 	if (!pHDR) return 0;
 	auto pSet = pHDR->pHitboxSet(pLocal->As<CBaseAnimating>()->m_nHitboxSet());
 	if (!pSet || pSet->numhitboxes <= HEAD_HITBOX) return 0;
-	auto pBox = pSet->pHitbox(HEAD_HITBOX);
-	if (!pBox) return 0;
+	auto pHeadBox = pSet->pHitbox(HEAD_HITBOX);
+	if (!pHeadBox) return 0;
 
-	const Vec3 vMins = pBox->bbmin;
-	const Vec3 vMaxs = pBox->bbmax;
-	const int iBone = pBox->bone;
+	const Vec3 vHeadMins = pHeadBox->bbmin;
+	const Vec3 vHeadMaxs = pHeadBox->bbmax;
+	const int iHeadBone = pHeadBox->bone;
 
 	const float flBodyYaw = SolveBodyYawForHeadTarget(pLocal, flTargetYaw);
 
@@ -448,9 +574,9 @@ int CFreestand::MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& thre
 	if (!SetupBonesForYaw(pLocal, flBodyYaw, tempBones))
 		return 0;
 
-	const float flHalfX = (vMaxs.x - vMins.x) * 0.5f;
-	const float flHalfY = (vMaxs.y - vMins.y) * 0.5f;
-	const float flHalfZ = (vMaxs.z - vMins.z) * 0.5f;
+	const float flHalfX = (vHeadMaxs.x - vHeadMins.x) * 0.5f;
+	const float flHalfY = (vHeadMaxs.y - vHeadMins.y) * 0.5f;
+	const float flHalfZ = (vHeadMaxs.z - vHeadMins.z) * 0.5f;
 
 	const Vec3 vLocalCorners[MULTIPOINT_CORNERS] = {
 		Vec3(-flHalfX, -flHalfY,  flHalfZ),
@@ -466,16 +592,43 @@ int CFreestand::MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& thre
 	int iHits = 0;
 	CTraceFilterHitscan filter;
 	filter.m_pSkip = pLocal;
+	filter.m_iTeam = threat.m_pPlayer->m_iTeamNum();
 
 	for (int c = 0; c < MULTIPOINT_CORNERS; c++)
 	{
-		Vec3 vWorld;
-		Math::VectorTransform(vLocalCorners[c], tempBones[iBone], vWorld);
+		Vec3 vHeadWorld;
+		Math::VectorTransform(vLocalCorners[c], tempBones[iHeadBone], vHeadWorld);
 
 		CGameTrace trace = {};
-		SDK::Trace(threat.m_vEyePos, vWorld, MASK_SHOT | CONTENTS_GRATE, &filter, &trace);
+		SDK::Trace(threat.m_vEyePos, vHeadWorld, MASK_SHOT | CONTENTS_GRATE, &filter, &trace);
 
-		if (trace.fraction >= 1.f)
+		bool bHitWorld = trace.fraction < 1.f;
+		bool bBlockedByBody = false;
+
+		if (!bHitWorld)
+		{
+			const float flDistToHead = (vHeadWorld - threat.m_vEyePos).Length();
+			float flClosestHit = FLT_MAX;
+
+			for (int h = 0; h < pSet->numhitboxes; h++)
+			{
+				if (h == HEAD_HITBOX)
+					continue;
+
+				auto pHitbox = pSet->pHitbox(h);
+				if (!pHitbox)
+					continue;
+
+				const float flDist = IntersectRayWithBox(threat.m_vEyePos, vHeadWorld, pHitbox->bbmin, pHitbox->bbmax, tempBones[pHitbox->bone]);
+				if (flDist >= 0.f && flDist < flClosestHit)
+					flClosestHit = flDist;
+			}
+
+			if (flClosestHit < flDistToHead)
+				bBlockedByBody = true;
+		}
+
+		if (!bHitWorld && !bBlockedByBody)
 			iHits++;
 	}
 

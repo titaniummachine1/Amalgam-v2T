@@ -441,6 +441,14 @@ void CFreestand::ClearHeatmap(int iResolution)
 	const int iSize = std::min(iResolution, MAX_HEATMAP_RESOLUTION);
 	memset(m_aHeatmapThreat, 0, sizeof(float) * iSize);
 	m_iTotalShotsAdded = 0;
+	
+	if (Vars::AntiAim::FreestandPitchOverride.Value)
+	{
+		memset(m_aHeatmapThreatUp, 0, sizeof(float) * iSize);
+		memset(m_aHeatmapThreatDown, 0, sizeof(float) * iSize);
+		m_iTotalShotsAddedUp = 0;
+		m_iTotalShotsAddedDown = 0;
+	}
 }
 
 void CFreestand::AccumulateThreatSample(float flYaw, float flThreatValue, int iResolution)
@@ -478,6 +486,51 @@ float CFreestand::GetNormalizedSafety(float flYaw, int iResolution) const
 	const float flThreat0 = m_aHeatmapThreat[iIndex0] / static_cast<float>(m_iTotalShotsAdded);
 	const float flThreat1 = m_aHeatmapThreat[iIndex1] / static_cast<float>(m_iTotalShotsAdded);
 
+	const float flInterpolatedThreat = flThreat0 * (1.f - flFrac) + flThreat1 * flFrac;
+	return 1.f - std::clamp(flInterpolatedThreat, 0.f, 1.f);
+}
+
+void CFreestand::AccumulateThreatSampleDual(float flYaw, float flThreatValue, int iResolution, bool bUpPitch)
+{
+	const int iSize = std::min(iResolution, MAX_HEATMAP_RESOLUTION);
+	const float flStep = 360.f / static_cast<float>(iSize);
+	float* pHeatmap = bUpPitch ? m_aHeatmapThreatUp : m_aHeatmapThreatDown;
+	
+	for (int i = 0; i < iSize; i++)
+	{
+		const float flSegmentYaw = -180.f + flStep * static_cast<float>(i);
+		const float flDiff = Math::NormalizeAngle(flYaw - flSegmentYaw);
+		const float flDist = fabsf(flDiff);
+		const float flNorm = flDist / 180.f;
+		const float flInterpolatedThreat = flThreatValue * (1.f - flNorm);
+		
+		pHeatmap[i] += flInterpolatedThreat;
+	}
+	
+	if (bUpPitch)
+		m_iTotalShotsAddedUp++;
+	else
+		m_iTotalShotsAddedDown++;
+}
+
+float CFreestand::GetNormalizedSafetyDual(float flYaw, int iResolution, bool bUpPitch) const
+{
+	const int iTotalShots = bUpPitch ? m_iTotalShotsAddedUp : m_iTotalShotsAddedDown;
+	if (iTotalShots == 0)
+		return 1.f;
+	
+	const float* pHeatmap = bUpPitch ? m_aHeatmapThreatUp : m_aHeatmapThreatDown;
+	const int iSize = std::min(iResolution, MAX_HEATMAP_RESOLUTION);
+	const float flStep = 360.f / static_cast<float>(iSize);
+	const float flNormYaw = Math::NormalizeAngle(flYaw) + 180.f;
+	const float flIndex = flNormYaw / flStep;
+	const int iIndex0 = static_cast<int>(floorf(flIndex)) % iSize;
+	const int iIndex1 = (iIndex0 + 1) % iSize;
+	const float flFrac = flIndex - floorf(flIndex);
+	
+	const float flThreat0 = pHeatmap[iIndex0] / static_cast<float>(iTotalShots);
+	const float flThreat1 = pHeatmap[iIndex1] / static_cast<float>(iTotalShots);
+	
 	const float flInterpolatedThreat = flThreat0 * (1.f - flFrac) + flThreat1 * flFrac;
 	return 1.f - std::clamp(flInterpolatedThreat, 0.f, 1.f);
 }
@@ -792,6 +845,199 @@ float CFreestand::FindMostDangerousYaw() const
 	return flWorstYaw;
 }
 
+void CFreestand::SampleThreatsDual(CTFPlayer* pLocal)
+{
+	if (!m_bBonesSetup) return;
+
+	auto pModel = pLocal->GetModel();
+	if (!pModel) return;
+	auto pHDR = I::ModelInfoClient->GetStudiomodel(pModel);
+	if (!pHDR) return;
+	auto pSet = pHDR->pHitboxSet(pLocal->As<CBaseAnimating>()->m_nHitboxSet());
+	if (!pSet || pSet->numhitboxes <= HEAD_HITBOX) return;
+	auto pBox = pSet->pHitbox(HEAD_HITBOX);
+	if (!pBox) return;
+
+	const int iBone = pBox->bone;
+	const Vec3 vMins = pBox->bbmin;
+	const Vec3 vMaxs = pBox->bbmax;
+	const float flHalfX = (vMaxs.x - vMins.x) * 0.5f;
+	const float flHalfY = (vMaxs.y - vMins.y) * 0.5f;
+	const float flHalfZ = (vMaxs.z - vMins.z) * 0.5f;
+
+	const Vec3 vLocalCorners[MULTIPOINT_CORNERS] = {
+		Vec3(-flHalfX, -flHalfY,  flHalfZ),
+		Vec3( flHalfX, -flHalfY,  flHalfZ),
+		Vec3(-flHalfX,  flHalfY,  flHalfZ),
+		Vec3( flHalfX,  flHalfY,  flHalfZ),
+		Vec3(-flHalfX, -flHalfY, -flHalfZ),
+		Vec3( flHalfX, -flHalfY, -flHalfZ),
+		Vec3(-flHalfX,  flHalfY, -flHalfZ),
+		Vec3( flHalfX,  flHalfY, -flHalfZ)
+	};
+
+	matrix3x4 tempBones[MAXSTUDIOBONES];
+	const int iInitialSegments = Vars::AntiAim::FreestandInitialSegments.Value;
+	const float flSegmentStep = 360.f / static_cast<float>(iInitialSegments);
+	const float flOldPitch = m_flCurrentPitch;
+	const int iResolution = static_cast<int>(360.f / Vars::AntiAim::FreestandDegreesPerSegment.Value);
+
+	for (int pitchMode = 0; pitchMode < 2; pitchMode++)
+	{
+		const bool bUpPitch = (pitchMode == 0);
+		m_flCurrentPitch = bUpPitch ? -89.f : 89.f;
+
+		for (auto& threat : m_vThreats)
+		{
+			threat.m_bSampleHit.resize(iInitialSegments);
+
+			for (int s = 0; s < iInitialSegments; s++)
+			{
+				const float flSampleYaw = threat.m_flDirToLocal + (flSegmentStep * static_cast<float>(s));
+				const float flBodyYaw = SolveBodyYawForHeadTarget(pLocal, flSampleYaw);
+
+				if (!SetupBonesForYaw(pLocal, flBodyYaw, tempBones))
+				{
+					threat.m_bSampleHit[s] = false;
+					continue;
+				}
+
+				CTraceFilterHitscan filter;
+				filter.m_pSkip = pLocal;
+				filter.m_iTeam = threat.m_pPlayer->m_iTeamNum();
+
+				Vec3 vHeadCenter;
+				Math::VectorTransform(Vec3(0, 0, 0), tempBones[iBone], vHeadCenter);
+
+				CGameTrace trace = {};
+				SDK::Trace(threat.m_vEyePos, vHeadCenter, MASK_SHOT | CONTENTS_GRATE, &filter, &trace);
+
+				bool bHitWorld = trace.fraction < 1.f;
+				bool bBlockedByBody = false;
+
+				if (!bHitWorld)
+				{
+					const float flDistToHead = (vHeadCenter - threat.m_vEyePos).Length();
+					float flClosestHit = FLT_MAX;
+
+					for (int h = 0; h < pSet->numhitboxes; h++)
+					{
+						if (h == HEAD_HITBOX)
+							continue;
+
+						auto pHitbox = pSet->pHitbox(h);
+						if (!pHitbox)
+							continue;
+
+						const float flDist = IntersectRayWithBox(threat.m_vEyePos, vHeadCenter, pHitbox->bbmin, pHitbox->bbmax, tempBones[pHitbox->bone]);
+						if (flDist >= 0.f && flDist < flClosestHit)
+							flClosestHit = flDist;
+					}
+
+					if (flClosestHit < flDistToHead)
+						bBlockedByBody = true;
+				}
+
+				if (!bHitWorld && !bBlockedByBody)
+				{
+					threat.m_bSampleHit[s] = true;
+					continue;
+				}
+
+				bool bAnyCornerExposed = false;
+				for (int c = 0; c < MULTIPOINT_CORNERS; c++)
+				{
+					Vec3 vWorld;
+					Math::VectorTransform(vLocalCorners[c], tempBones[iBone], vWorld);
+
+					SDK::Trace(threat.m_vEyePos, vWorld, MASK_SHOT | CONTENTS_GRATE, &filter, &trace);
+
+					bHitWorld = trace.fraction < 1.f;
+					bBlockedByBody = false;
+
+					if (!bHitWorld)
+					{
+						const float flDistToCorner = (vWorld - threat.m_vEyePos).Length();
+						float flClosestHit = FLT_MAX;
+
+						for (int h = 0; h < pSet->numhitboxes; h++)
+						{
+							if (h == HEAD_HITBOX)
+								continue;
+
+							auto pHitbox = pSet->pHitbox(h);
+							if (!pHitbox)
+								continue;
+
+							const float flDist = IntersectRayWithBox(threat.m_vEyePos, vWorld, pHitbox->bbmin, pHitbox->bbmax, tempBones[pHitbox->bone]);
+							if (flDist >= 0.f && flDist < flClosestHit)
+								flClosestHit = flDist;
+						}
+
+						if (flClosestHit < flDistToCorner)
+							bBlockedByBody = true;
+					}
+
+					if (!bHitWorld && !bBlockedByBody)
+					{
+						bAnyCornerExposed = true;
+						break;
+					}
+				}
+
+				threat.m_bSampleHit[s] = bAnyCornerExposed;
+			}
+		}
+
+		for (const auto& threat : m_vThreats)
+		{
+			for (int s = 0; s < iInitialSegments && s < static_cast<int>(threat.m_bSampleHit.size()); s++)
+			{
+				if (threat.m_bSampleHit[s])
+				{
+					const float flSampleYaw = threat.m_flDirToLocal + (flSegmentStep * static_cast<float>(s));
+					AccumulateThreatSampleDual(flSampleYaw, 1.f, iResolution, bUpPitch);
+				}
+			}
+		}
+	}
+
+	m_flCurrentPitch = flOldPitch;
+}
+
+float CFreestand::FindSafestYawDual(bool& bOutUpPitch) const
+{
+	const int iResolution = static_cast<int>(360.f / Vars::AntiAim::FreestandDegreesPerSegment.Value);
+	const float flStep = 360.f / static_cast<float>(iResolution);
+	float flBestYaw = 0.f;
+	float flBestSafety = -1.f;
+	bool bBestIsUp = true;
+
+	for (int i = 0; i < iResolution; i++)
+	{
+		const float flYaw = -180.f + flStep * static_cast<float>(i);
+		
+		const float flSafetyUp = GetNormalizedSafetyDual(flYaw, iResolution, true);
+		if (flSafetyUp > flBestSafety)
+		{
+			flBestSafety = flSafetyUp;
+			flBestYaw = flYaw;
+			bBestIsUp = true;
+		}
+		
+		const float flSafetyDown = GetNormalizedSafetyDual(flYaw, iResolution, false);
+		if (flSafetyDown > flBestSafety)
+		{
+			flBestSafety = flSafetyDown;
+			flBestYaw = flYaw;
+			bBestIsUp = false;
+		}
+	}
+
+	bOutUpPitch = bBestIsUp;
+	return flBestYaw;
+}
+
 void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd, float flPitch)
 {
 	m_vOrigin = pLocal->m_vecOrigin();
@@ -806,23 +1052,59 @@ void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd, float flPitch)
 	if (m_flHeadRadius < 0.01f)
 		return;
 
-	if (!m_vThreats.empty())
-		SampleThreats(pLocal);
-
 	const float flDegreesPerSegment = Vars::AntiAim::FreestandDegreesPerSegment.Value;
-	BuildHeatmap(flDegreesPerSegment);
-
-	m_flSafestYaw = FindSafestYaw();
-	m_flMostDangerousYaw = FindMostDangerousYaw();
-
 	const int iVisualSegments = Vars::AntiAim::FreestandSegments.Value;
-	BuildHeatmapVisualization(iVisualSegments, flDegreesPerSegment);
 
-	if (!m_vThreats.empty())
+	if (Vars::AntiAim::FreestandPitchOverride.Value && !m_vThreats.empty())
 	{
-		RefineHeatmap(pLocal);
+		const int iResolution = static_cast<int>(360.f / flDegreesPerSegment);
+		ClearHeatmap(iResolution);
+		
+		SampleThreatsDual(pLocal);
+		
+		const int iMaxIterations = Vars::AntiAim::FreestandIterations.Value;
+		for (int iter = 0; iter < iMaxIterations; iter++)
+		{
+			bool bUpPitch = true;
+			m_flSafestYaw = FindSafestYawDual(bUpPitch);
+			m_flBestPitch = bUpPitch ? -89.f : 89.f;
+			
+			const float flOldPitch = m_flCurrentPitch;
+			m_flCurrentPitch = m_flBestPitch;
+			
+			int iTotalHits = 0;
+			for (auto& threat : m_vThreats)
+				iTotalHits += MultipointCheck(pLocal, threat, m_flSafestYaw);
+			
+			m_flCurrentPitch = flOldPitch;
+			
+			if (iTotalHits == 0)
+				break;
+			
+			AccumulateThreatSampleDual(m_flSafestYaw, 1.f, iResolution, bUpPitch);
+		}
+		
+		m_flMostDangerousYaw = 0.f;
+		BuildHeatmapVisualization(iVisualSegments, flDegreesPerSegment);
+	}
+	else
+	{
+		if (!m_vThreats.empty())
+			SampleThreats(pLocal);
+
+		BuildHeatmap(flDegreesPerSegment);
+
 		m_flSafestYaw = FindSafestYaw();
 		m_flMostDangerousYaw = FindMostDangerousYaw();
+
+		BuildHeatmapVisualization(iVisualSegments, flDegreesPerSegment);
+
+		if (!m_vThreats.empty())
+		{
+			RefineHeatmap(pLocal);
+			m_flSafestYaw = FindSafestYaw();
+			m_flMostDangerousYaw = FindMostDangerousYaw();
+		}
 	}
 
 	m_bHasSafeYaw = false;

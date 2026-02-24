@@ -62,14 +62,18 @@ private:
 	Vec3 HeadPosForYaw(float flYaw) const;
 	void ClearHeatmap(int iResolution);
 	void AccumulateThreatSample(float flYaw, float flThreatValue, int iResolution);
+	void AccumulateThreatSampleDual(float flYaw, float flThreatValue, int iResolution, bool bUpPitch);
 	float GetNormalizedSafety(float flYaw, int iResolution) const;
+	float GetNormalizedSafetyDual(float flYaw, int iResolution, bool bUpPitch) const;
 	void BuildHeatmap(float flDegreesPerSegment);
 	void BuildHeatmapVisualization(int iVisualSegments, float flDataDegreesPerSegment);
 	int MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& threat, float flTargetYaw);
 	int MultipointCheckDetailed(CTFPlayer* pLocal, const FreestandThreat_t& threat, float flTargetYaw, bool& bOutWorldBlocked, bool& bOutBodyBlocked);
 	void RefineHeatmap(CTFPlayer* pLocal);
 	void SampleThreats(CTFPlayer* pLocal);
+	void SampleThreatsDual(CTFPlayer* pLocal);
 	float FindSafestYaw() const;
+	float FindSafestYawDual(bool& bOutUpPitch) const;
 	float FindMostDangerousYaw() const;
 
 public:

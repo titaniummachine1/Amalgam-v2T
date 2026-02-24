@@ -758,8 +758,12 @@ void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd)
 	{
 		const int iResolution = static_cast<int>(360.f / flDegreesPerSegment);
 		const float flBestSafety = GetNormalizedSafety(m_flSafestYaw, iResolution);
+		const float flWorstSafety = GetNormalizedSafety(m_flMostDangerousYaw, iResolution);
 		
-		m_bHasSafeYaw = (flBestSafety >= 1.0f);
+		const bool bFoundSafeAngle = (flBestSafety >= 1.0f);
+		const bool bAllAnglesSafe = (flWorstSafety >= 1.0f);
+		
+		m_bHasSafeYaw = bFoundSafeAngle && !bAllAnglesSafe;
 	}
 }
 

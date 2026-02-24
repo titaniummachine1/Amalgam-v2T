@@ -25,8 +25,8 @@ class CFreestand
 private:
 	float m_flHeadRadius = 0.f;
 	float m_flHeadHeightOffset = 0.f;
-	float m_flHeadYawOffset = 0.f;
 	float m_flCurrentBodyYaw = 0.f;
+	float m_flCurrentPitch = -89.f;
 	Vec3 m_vOrigin = {};
 	Vec3 m_vViewPos = {};
 	Vec3 m_vHeadCenter = {};
@@ -35,9 +35,6 @@ private:
 	bool m_bBonesSetup = false;
 	int m_iHeadBone = 0;
 	float m_flViewYaw = 0.f;
-
-	mutable std::unordered_map<int, float> m_mYawCorrectionCache = {};
-	Vec3 m_vPrevHeadCenter = {};
 
 	std::vector<FreestandThreat_t> m_vThreats = {};
 
@@ -64,13 +61,14 @@ private:
 	void BuildHeatmap(float flDegreesPerSegment);
 	void BuildHeatmapVisualization(int iVisualSegments, float flDataDegreesPerSegment);
 	int MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& threat, float flTargetYaw);
+	int MultipointCheckDetailed(CTFPlayer* pLocal, const FreestandThreat_t& threat, float flTargetYaw, bool& bOutWorldBlocked, bool& bOutBodyBlocked);
 	void RefineHeatmap(CTFPlayer* pLocal);
 	void SampleThreats(CTFPlayer* pLocal);
 	float FindSafestYaw() const;
 	float FindMostDangerousYaw() const;
 
 public:
-	void Run(CTFPlayer* pLocal, CUserCmd* pCmd);
+	void Run(CTFPlayer* pLocal, CUserCmd* pCmd, float flPitch);
 	bool HasSafeYaw() const { return m_bHasSafeYaw; }
 	float GetSafestYaw() const { return m_flSafestYaw; }
 	float GetMostDangerousYaw() const { return m_flMostDangerousYaw; }

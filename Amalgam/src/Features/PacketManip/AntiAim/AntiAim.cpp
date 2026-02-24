@@ -329,11 +329,14 @@ void CAntiAim::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 	const bool bNeedsFreestand = Vars::AntiAim::FreestandEnabled.Value
 		|| Vars::AntiAim::PitchReal.Value == Vars::AntiAim::PitchRealEnum::Auto
 		|| Vars::AntiAim::PitchFake.Value == Vars::AntiAim::PitchFakeEnum::Auto;
+	
+	float flRealPitch = iAntiBackstab != 2 ? GetPitch(pLocal, pCmd->viewangles.x) : pCmd->viewangles.x;
+	
 	if (bNeedsFreestand)
-		F::Freestand.Run(pLocal, pCmd);
+		F::Freestand.Run(pLocal, pCmd, flRealPitch);
 
 	Vec2& vAngles = G::SendPacket ? vFakeAngles : vRealAngles;
-	vAngles.x = iAntiBackstab != 2 ? GetPitch(pLocal, pCmd->viewangles.x) : pCmd->viewangles.x;
+	vAngles.x = flRealPitch;
 	vAngles.y = !iAntiBackstab ? GetYaw(pLocal, pCmd, G::SendPacket) : pCmd->viewangles.y;
 
 	if (Vars::Misc::Game::AntiCheatCompatibility.Value)

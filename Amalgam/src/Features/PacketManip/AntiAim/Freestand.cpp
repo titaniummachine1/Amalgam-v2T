@@ -97,25 +97,6 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 
 	m_flCurrentBodyYaw = pLocal->m_angEyeAnglesY();
 	m_flViewYaw = m_flCurrentBodyYaw;
-	
-	Vec3 vViewToHead = vHeadCenter - m_vViewPos;
-	vViewToHead.z = 0.f;
-	if (vViewToHead.Length() > 0.1f)
-	{
-		float flHeadWorldYaw = RAD2DEG(atan2f(vViewToHead.y, vViewToHead.x));
-		m_flHeadYawOffset = Math::NormalizeAngle(flHeadWorldYaw - m_flCurrentBodyYaw);
-	}
-	else
-	{
-		m_flHeadYawOffset = 0.f;
-	}
-
-	const float flHeadMoveDist = (vHeadCenter - m_vPrevHeadCenter).Length();
-	if (flHeadMoveDist > 2.f)
-	{
-		m_mYawCorrectionCache.clear();
-		m_vPrevHeadCenter = vHeadCenter;
-	}
 }
 
 bool CFreestand::SetupBonesForYaw(CTFPlayer* pLocal, float flBodyYaw, matrix3x4* pBonesOut)
@@ -127,6 +108,8 @@ bool CFreestand::SetupBonesForYaw(CTFPlayer* pLocal, float flBodyYaw, matrix3x4*
 	if (!pAnimState)
 		return false;
 
+	float flPitch = m_flCurrentPitch;
+
 	const float flOldFrameTime = I::GlobalVars->frametime;
 	const int nOldSequence = pLocal->m_nSequence();
 	const float flOldCycle = pLocal->m_flCycle();
@@ -135,7 +118,7 @@ bool CFreestand::SetupBonesForYaw(CTFPlayer* pLocal, float flBodyYaw, matrix3x4*
 	memcpy(pOldAnimState, pAnimState, sizeof(CTFPlayerAnimState));
 
 	I::GlobalVars->frametime = 0.f;
-	pAnimState->Update(pAnimState->m_flCurrentFeetYaw = flBodyYaw, pLocal->m_angEyeAnglesX());
+	pAnimState->Update(pAnimState->m_flCurrentFeetYaw = flBodyYaw, flPitch);
 	pLocal->InvalidateBoneCache();
 	const bool bSuccess = pLocal->SetupBones(pBonesOut, MAXSTUDIOBONES, BONE_USED_BY_ANYTHING, I::GlobalVars->curtime);
 
@@ -241,7 +224,21 @@ float CFreestand::SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHea
 	if (!pLocal)
 		return flTargetHeadYaw;
 
-	return Math::NormalizeAngle(flTargetHeadYaw - m_flHeadYawOffset);
+	matrix3x4 tempBones[MAXSTUDIOBONES];
+	if (!SetupBonesForYaw(pLocal, flTargetHeadYaw, tempBones))
+		return flTargetHeadYaw;
+
+	const Vec3 vActualHeadCenter = GetHeadCenterFromBones(tempBones);
+	if (vActualHeadCenter.IsZero())
+		return flTargetHeadYaw;
+
+	const float flActualHeadYaw = RAD2DEG(atan2f(
+		vActualHeadCenter.y - m_vViewPos.y,
+		vActualHeadCenter.x - m_vViewPos.x
+	));
+
+	const float flOffset = Math::NormalizeAngle(flActualHeadYaw - flTargetHeadYaw);
+	return Math::NormalizeAngle(flTargetHeadYaw - flOffset);
 }
 
 float CFreestand::GetSecurePitch(CTFPlayer* pLocal)
@@ -532,6 +529,96 @@ void CFreestand::BuildHeatmapVisualization(int iVisualSegments, float flDataDegr
 	}
 }
 
+int CFreestand::MultipointCheckDetailed(CTFPlayer* pLocal, const FreestandThreat_t& threat, float flTargetYaw, bool& bOutWorldBlocked, bool& bOutBodyBlocked)
+{
+	auto pModel = pLocal->GetModel();
+	if (!pModel) return 0;
+	auto pHDR = I::ModelInfoClient->GetStudiomodel(pModel);
+	if (!pHDR) return 0;
+	auto pSet = pHDR->pHitboxSet(pLocal->As<CBaseAnimating>()->m_nHitboxSet());
+	if (!pSet || pSet->numhitboxes <= HEAD_HITBOX) return 0;
+	auto pHeadBox = pSet->pHitbox(HEAD_HITBOX);
+	if (!pHeadBox) return 0;
+
+	const Vec3 vHeadMins = pHeadBox->bbmin;
+	const Vec3 vHeadMaxs = pHeadBox->bbmax;
+	const int iHeadBone = pHeadBox->bone;
+
+	const float flBodyYaw = SolveBodyYawForHeadTarget(pLocal, flTargetYaw);
+
+	matrix3x4 tempBones[MAXSTUDIOBONES];
+	if (!SetupBonesForYaw(pLocal, flBodyYaw, tempBones))
+		return 0;
+
+	const float flHalfX = (vHeadMaxs.x - vHeadMins.x) * 0.5f;
+	const float flHalfY = (vHeadMaxs.y - vHeadMins.y) * 0.5f;
+	const float flHalfZ = (vHeadMaxs.z - vHeadMins.z) * 0.5f;
+
+	const Vec3 vLocalCorners[MULTIPOINT_CORNERS] = {
+		Vec3(-flHalfX, -flHalfY,  flHalfZ),
+		Vec3( flHalfX, -flHalfY,  flHalfZ),
+		Vec3(-flHalfX,  flHalfY,  flHalfZ),
+		Vec3( flHalfX,  flHalfY,  flHalfZ),
+		Vec3(-flHalfX, -flHalfY, -flHalfZ),
+		Vec3( flHalfX, -flHalfY, -flHalfZ),
+		Vec3(-flHalfX,  flHalfY, -flHalfZ),
+		Vec3( flHalfX,  flHalfY, -flHalfZ)
+	};
+
+	int iHits = 0;
+	int iWorldBlocks = 0;
+	int iBodyBlocks = 0;
+	CTraceFilterHitscan filter;
+	filter.m_pSkip = pLocal;
+	filter.m_iTeam = threat.m_pPlayer->m_iTeamNum();
+
+	for (int c = 0; c < MULTIPOINT_CORNERS; c++)
+	{
+		Vec3 vHeadWorld;
+		Math::VectorTransform(vLocalCorners[c], tempBones[iHeadBone], vHeadWorld);
+
+		CGameTrace trace = {};
+		SDK::Trace(threat.m_vEyePos, vHeadWorld, MASK_SHOT | CONTENTS_GRATE, &filter, &trace);
+
+		bool bHitWorld = trace.fraction < 1.f;
+		bool bBlockedByBody = false;
+
+		if (!bHitWorld)
+		{
+			const float flDistToHead = (vHeadWorld - threat.m_vEyePos).Length();
+			float flClosestHit = FLT_MAX;
+
+			for (int h = 0; h < pSet->numhitboxes; h++)
+			{
+				if (h == HEAD_HITBOX)
+					continue;
+
+				auto pHitbox = pSet->pHitbox(h);
+				if (!pHitbox)
+					continue;
+
+				const float flDist = IntersectRayWithBox(threat.m_vEyePos, vHeadWorld, pHitbox->bbmin, pHitbox->bbmax, tempBones[pHitbox->bone]);
+				if (flDist >= 0.f && flDist < flClosestHit)
+					flClosestHit = flDist;
+			}
+
+			if (flClosestHit < flDistToHead)
+				bBlockedByBody = true;
+		}
+
+		if (bHitWorld)
+			iWorldBlocks++;
+		else if (bBlockedByBody)
+			iBodyBlocks++;
+		else
+			iHits++;
+	}
+
+	bOutWorldBlocked = (iWorldBlocks == MULTIPOINT_CORNERS);
+	bOutBodyBlocked = (iBodyBlocks == MULTIPOINT_CORNERS);
+	return iHits;
+}
+
 int CFreestand::MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& threat, float flTargetYaw)
 {
 	if (!m_bBonesSetup) return 0;
@@ -705,10 +792,11 @@ float CFreestand::FindMostDangerousYaw() const
 	return flWorstYaw;
 }
 
-void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd)
+void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd, float flPitch)
 {
 	m_vOrigin = pLocal->m_vecOrigin();
 	m_vViewPos = pLocal->GetShootPos();
+	m_flCurrentPitch = flPitch;
 
 	Reset();
 
@@ -752,22 +840,25 @@ void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd)
 		
 		if (m_bHasSafeYaw)
 		{
-			matrix3x4 tempBones[MAXSTUDIOBONES];
-			const float flBodyYaw = SolveBodyYawForHeadTarget(pLocal, m_flSafestYaw);
-			if (SetupBonesForYaw(pLocal, flBodyYaw, tempBones))
+			bool bAllWorldBlocked = true;
+			bool bAnyBodyBlock = false;
+			
+			for (const auto& threat : m_vThreats)
 			{
-				bool bAnyBodyBlock = false;
-				for (const auto& threat : m_vThreats)
+				bool bWorldBlocked = false;
+				bool bBodyBlocked = false;
+				const int iHits = MultipointCheckDetailed(pLocal, threat, m_flSafestYaw, bWorldBlocked, bBodyBlocked);
+				
+				if (iHits == 0)
 				{
-					const int iHits = MultipointCheck(pLocal, threat, m_flSafestYaw);
-					if (iHits == 0)
-					{
+					if (bBodyBlocked)
 						bAnyBodyBlock = true;
-						break;
-					}
+					if (!bWorldBlocked)
+						bAllWorldBlocked = false;
 				}
-				m_bSafestIsBodyBlocked = bAnyBodyBlock;
 			}
+			
+			m_bSafestIsBodyBlocked = (bAnyBodyBlock && !bAllWorldBlocked);
 		}
 	}
 }

@@ -750,7 +750,17 @@ void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd)
 	if (!m_vThreats.empty())
 		RefineHeatmap(pLocal);
 
-	m_bHasSafeYaw = !m_vThreats.empty();
+	if (m_vThreats.empty())
+	{
+		m_bHasSafeYaw = false;
+	}
+	else
+	{
+		const int iResolution = static_cast<int>(360.f / flDegreesPerSegment);
+		const float flBestSafety = GetNormalizedSafety(m_flSafestYaw, iResolution);
+		
+		m_bHasSafeYaw = (flBestSafety >= 1.0f);
+	}
 }
 
 void CFreestand::Render()

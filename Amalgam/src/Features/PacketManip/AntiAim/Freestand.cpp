@@ -240,32 +240,7 @@ float CFreestand::SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHea
 	if (!pLocal)
 		return flTargetHeadYaw;
 
-	float flBodyYaw = flTargetHeadYaw;
-	matrix3x4 tempBones[MAXSTUDIOBONES];
-	
-	for (int iter = 0; iter < 32; iter++)
-	{
-		if (!SetupBonesForYaw(pLocal, flBodyYaw, tempBones))
-			break;
-
-		const Vec3 vActualHeadCenter = GetHeadCenterFromBones(tempBones);
-		if (vActualHeadCenter.IsZero())
-			break;
-
-		const float flActualHeadYaw = RAD2DEG(atan2f(
-			vActualHeadCenter.y - m_vViewPos.y,
-			vActualHeadCenter.x - m_vViewPos.x
-		));
-
-		const float flError = Math::NormalizeAngle(flTargetHeadYaw - flActualHeadYaw);
-
-		if (fabsf(flError) < 0.1f)
-			break;
-
-		flBodyYaw = Math::NormalizeAngle(flBodyYaw + flError);
-	}
-	
-	return flBodyYaw;
+	return Math::NormalizeAngle(flTargetHeadYaw - m_flHeadYawOffset);
 }
 
 float CFreestand::GetSecurePitch(CTFPlayer* pLocal)

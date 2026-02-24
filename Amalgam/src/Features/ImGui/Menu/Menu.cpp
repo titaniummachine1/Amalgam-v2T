@@ -1342,6 +1342,11 @@ void CMenu::MenuHvH(int iTab)
 					}
 					PopTransparent();
 				} EndSection();
+			}
+
+			/* Column 2 */
+			TableNextColumn();
+			{
 				if (Section("Resolver", 8))
 				{
 					FToggle(Vars::Resolver::Enabled, FToggleEnum::Left);

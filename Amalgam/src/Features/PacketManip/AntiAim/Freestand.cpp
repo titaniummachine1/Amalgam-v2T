@@ -242,10 +242,11 @@ float CFreestand::SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHea
 	if (it != m_mYawCorrectionCache.end())
 		return it->second;
 
-	float flBodyYaw = Math::NormalizeAngle(flTargetHeadYaw - m_flHeadYawOffset);
+	float flCurrentOffset = m_flHeadYawOffset;
+	float flBodyYaw = Math::NormalizeAngle(flTargetHeadYaw - flCurrentOffset);
 
 	matrix3x4 tempBones[MAXSTUDIOBONES];
-	for (int iter = 0; iter < 3; iter++)
+	for (int iter = 0; iter < 32; iter++)
 	{
 		if (!SetupBonesForYaw(pLocal, flBodyYaw, tempBones))
 			break;
@@ -261,10 +262,11 @@ float CFreestand::SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHea
 
 		const float flError = Math::NormalizeAngle(flTargetHeadYaw - flActualHeadYaw);
 
-		if (fabsf(flError) < 1.f)
+		if (fabsf(flError) < 0.1f)
 			break;
 
-		flBodyYaw = Math::NormalizeAngle(flBodyYaw + flError);
+		flCurrentOffset = Math::NormalizeAngle(flCurrentOffset - flError);
+		flBodyYaw = Math::NormalizeAngle(flTargetHeadYaw - flCurrentOffset);
 	}
 
 	m_mYawCorrectionCache[iCacheKey] = flBodyYaw;

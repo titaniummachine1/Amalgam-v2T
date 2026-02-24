@@ -750,28 +750,18 @@ void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd)
 	if (!m_vThreats.empty())
 		RefineHeatmap(pLocal);
 
-	if (m_vThreats.empty())
+	m_bHasSafeYaw = false;
+	
+	if (!m_vThreats.empty())
 	{
-		m_bHasSafeYaw = false;
-	}
-	else
-	{
-		float flBestVerifiedSafety = 0.f;
-		float flWorstVerifiedSafety = 1.f;
-		
 		for (const auto& point : m_vHeatmap)
 		{
-			if (point.m_bVerified)
+			if (point.m_bVerified && point.m_iHitsOut8 == 0)
 			{
-				flBestVerifiedSafety = std::max(flBestVerifiedSafety, point.m_flSafety);
-				flWorstVerifiedSafety = std::min(flWorstVerifiedSafety, point.m_flSafety);
+				m_bHasSafeYaw = true;
+				break;
 			}
 		}
-		
-		const bool bFoundSafeAngle = (flBestVerifiedSafety >= 1.0f);
-		const bool bAllAnglesSafe = (flWorstVerifiedSafety >= 1.0f);
-		
-		m_bHasSafeYaw = bFoundSafeAngle && !bAllAnglesSafe;
 	}
 }
 

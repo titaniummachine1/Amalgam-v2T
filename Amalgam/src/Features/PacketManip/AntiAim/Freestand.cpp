@@ -96,9 +96,12 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 
 	m_flCurrentBodyYaw = pLocal->m_angEyeAnglesY();
 	m_flViewYaw = m_flCurrentBodyYaw;
-	if (vHorizontalDelta.Length() > 0.1f)
+	
+	Vec3 vViewToHead = vHeadCenter - m_vViewPos;
+	vViewToHead.z = 0.f;
+	if (vViewToHead.Length() > 0.1f)
 	{
-		float flHeadWorldYaw = RAD2DEG(atan2f(vHorizontalDelta.y, vHorizontalDelta.x));
+		float flHeadWorldYaw = RAD2DEG(atan2f(vViewToHead.y, vViewToHead.x));
 		m_flHeadYawOffset = Math::NormalizeAngle(flHeadWorldYaw - m_flCurrentBodyYaw);
 	}
 	else
@@ -242,8 +245,7 @@ float CFreestand::SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHea
 	if (it != m_mYawCorrectionCache.end())
 		return it->second;
 
-	float flCurrentOffset = m_flHeadYawOffset;
-	float flBodyYaw = Math::NormalizeAngle(flTargetHeadYaw - flCurrentOffset);
+	float flBodyYaw = Math::NormalizeAngle(flTargetHeadYaw - m_flHeadYawOffset);
 
 	matrix3x4 tempBones[MAXSTUDIOBONES];
 	for (int iter = 0; iter < 32; iter++)
@@ -256,8 +258,8 @@ float CFreestand::SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHea
 			break;
 
 		const float flActualHeadYaw = RAD2DEG(atan2f(
-			vActualHeadCenter.y - m_vOrigin.y,
-			vActualHeadCenter.x - m_vOrigin.x
+			vActualHeadCenter.y - m_vViewPos.y,
+			vActualHeadCenter.x - m_vViewPos.x
 		));
 
 		const float flError = Math::NormalizeAngle(flTargetHeadYaw - flActualHeadYaw);
@@ -265,8 +267,7 @@ float CFreestand::SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHea
 		if (fabsf(flError) < 0.1f)
 			break;
 
-		flCurrentOffset = Math::NormalizeAngle(flCurrentOffset - flError);
-		flBodyYaw = Math::NormalizeAngle(flTargetHeadYaw - flCurrentOffset);
+		flBodyYaw = Math::NormalizeAngle(flBodyYaw + flError);
 	}
 
 	m_mYawCorrectionCache[iCacheKey] = flBodyYaw;

@@ -332,11 +332,11 @@ void CFreestand::SampleThreats(CTFPlayer* pLocal)
 	matrix3x4 tempBones[MAXSTUDIOBONES];
 	const int iInitialSegments = Vars::AntiAim::FreestandInitialSegments.Value;
 	const float flSegmentStep = 360.f / static_cast<float>(iInitialSegments);
-	
+
 	for (auto& threat : m_vThreats)
 	{
 		threat.m_bSampleHit.resize(iInitialSegments);
-		
+
 		for (int s = 0; s < iInitialSegments; s++)
 		{
 			const float flSampleYaw = threat.m_flDirToLocal + (flSegmentStep * static_cast<float>(s));
@@ -840,8 +840,8 @@ void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd, float flPitch)
 		
 		if (m_bHasSafeYaw)
 		{
-			bool bAllWorldBlocked = true;
-			bool bAnyBodyBlock = false;
+			int iWorldBlockedCount = 0;
+			int iBodyBlockedCount = 0;
 			
 			for (const auto& threat : m_vThreats)
 			{
@@ -851,14 +851,14 @@ void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd, float flPitch)
 				
 				if (iHits == 0)
 				{
-					if (bBodyBlocked)
-						bAnyBodyBlock = true;
-					if (!bWorldBlocked)
-						bAllWorldBlocked = false;
+					if (bWorldBlocked)
+						iWorldBlockedCount++;
+					else if (bBodyBlocked)
+						iBodyBlockedCount++;
 				}
 			}
 			
-			m_bSafestIsBodyBlocked = (bAnyBodyBlock && !bAllWorldBlocked);
+			m_bSafestIsBodyBlocked = (iBodyBlockedCount > 0 && iWorldBlockedCount == 0);
 		}
 	}
 }

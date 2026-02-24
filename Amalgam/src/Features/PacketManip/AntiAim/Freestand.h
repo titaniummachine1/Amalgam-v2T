@@ -27,6 +27,7 @@ private:
 	float m_flHeadHeightOffset = 0.f;
 	float m_flCurrentBodyYaw = 0.f;
 	float m_flCurrentPitch = -89.f;
+	float m_flBestPitch = -89.f;
 	Vec3 m_vOrigin = {};
 	Vec3 m_vViewPos = {};
 	Vec3 m_vHeadCenter = {};
@@ -41,6 +42,10 @@ private:
 	static constexpr int MAX_HEATMAP_RESOLUTION = 720;
 	float m_aHeatmapThreat[MAX_HEATMAP_RESOLUTION] = {};
 	int m_iTotalShotsAdded = 0;
+	float m_aHeatmapThreatUp[MAX_HEATMAP_RESOLUTION] = {};
+	float m_aHeatmapThreatDown[MAX_HEATMAP_RESOLUTION] = {};
+	int m_iTotalShotsAddedUp = 0;
+	int m_iTotalShotsAddedDown = 0;
 
 	std::vector<HeatmapPoint_t> m_vHeatmap = {};
 

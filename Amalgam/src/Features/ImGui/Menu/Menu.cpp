@@ -1332,8 +1332,9 @@ void CMenu::MenuHvH(int iTab)
 					{
 						FSlider(Vars::AntiAim::FreestandInitialSegments, FSliderEnum::Left);
 						FSlider(Vars::AntiAim::FreestandIterations, FSliderEnum::Right);
-						FSlider(Vars::AntiAim::FreestandDegreesPerSegment, FSliderEnum::Left);
-						FToggle(Vars::AntiAim::FreestandVisuals, FToggleEnum::Right);
+						FToggle(Vars::AntiAim::FreestandPitchOverride, FToggleEnum::Left);
+						FSlider(Vars::AntiAim::FreestandDegreesPerSegment, FSliderEnum::Right);
+						FToggle(Vars::AntiAim::FreestandVisuals, FToggleEnum::Left);
 						PushTransparent(!Vars::AntiAim::FreestandVisuals.Value);
 						{
 							FSlider(Vars::AntiAim::FreestandSegments, FSliderEnum::Left);

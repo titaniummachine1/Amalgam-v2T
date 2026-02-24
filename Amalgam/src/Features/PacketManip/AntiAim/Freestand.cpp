@@ -756,12 +756,20 @@ void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd)
 	}
 	else
 	{
-		const int iResolution = static_cast<int>(360.f / flDegreesPerSegment);
-		const float flBestSafety = GetNormalizedSafety(m_flSafestYaw, iResolution);
-		const float flWorstSafety = GetNormalizedSafety(m_flMostDangerousYaw, iResolution);
+		float flBestVerifiedSafety = 0.f;
+		float flWorstVerifiedSafety = 1.f;
 		
-		const bool bFoundSafeAngle = (flBestSafety >= 1.0f);
-		const bool bAllAnglesSafe = (flWorstSafety >= 1.0f);
+		for (const auto& point : m_vHeatmap)
+		{
+			if (point.m_bVerified)
+			{
+				flBestVerifiedSafety = std::max(flBestVerifiedSafety, point.m_flSafety);
+				flWorstVerifiedSafety = std::min(flWorstVerifiedSafety, point.m_flSafety);
+			}
+		}
+		
+		const bool bFoundSafeAngle = (flBestVerifiedSafety >= 1.0f);
+		const bool bAllAnglesSafe = (flWorstVerifiedSafety >= 1.0f);
 		
 		m_bHasSafeYaw = bFoundSafeAngle && !bAllAnglesSafe;
 	}

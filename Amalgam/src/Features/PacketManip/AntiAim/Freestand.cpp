@@ -17,6 +17,9 @@ void CFreestand::Reset()
 	m_flSafestYaw = 0.f;
 	m_flMostDangerousYaw = 0.f;
 	m_bHasSafeYaw = false;
+	
+	memset(m_aHeatmapThreat, 0, sizeof(m_aHeatmapThreat));
+	m_iTotalShotsAdded = 0;
 }
 
 void CFreestand::GatherThreats(CTFPlayer* pLocal)
@@ -752,7 +755,7 @@ void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd)
 
 	m_bHasSafeYaw = false;
 	
-	if (!m_vThreats.empty())
+	if (!m_vThreats.empty() && m_iTotalShotsAdded > 0)
 	{
 		for (const auto& point : m_vHeatmap)
 		{

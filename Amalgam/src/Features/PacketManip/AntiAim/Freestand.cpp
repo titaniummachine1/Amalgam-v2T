@@ -755,7 +755,11 @@ void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd)
 	BuildHeatmapVisualization(iVisualSegments, flDegreesPerSegment);
 
 	if (!m_vThreats.empty())
+	{
 		RefineHeatmap(pLocal);
+		m_flSafestYaw = FindSafestYaw();
+		m_flMostDangerousYaw = FindMostDangerousYaw();
+	}
 
 	m_bHasSafeYaw = false;
 	

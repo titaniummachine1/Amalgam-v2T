@@ -109,7 +109,7 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 		m_iHeadBone = pBox ? pBox->bone : 0;
 	}
 
-	Vec3 vHorizontalDelta = vHeadCenter - m_vOrigin;
+	Vec3 vHorizontalDelta = vHeadCenter - m_vViewPos;
 	vHorizontalDelta.z = 0.f;
 	m_flHeadRadius = vHorizontalDelta.Length();
 
@@ -119,7 +119,7 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 	m_flCurrentBodyYaw = pLocal->m_angEyeAnglesY();
 	m_flViewYaw = m_flCurrentBodyYaw;
 
-	Vec3 vCircleCenter = Vec3(m_vOrigin.x, m_vOrigin.y, vHeadCenter.z);
+	Vec3 vCircleCenter = Vec3(m_vViewPos.x, m_vViewPos.y, vHeadCenter.z);
 
 	const float flActualHeadYaw = RAD2DEG(atan2f(
 		vHeadCenter.y - vCircleCenter.y,
@@ -267,7 +267,7 @@ float CFreestand::IntersectRayWithBox(const Vec3& vStart, const Vec3& vEnd, cons
 Vec3 CFreestand::HeadPosForYaw(float flYaw) const
 {
 	float flRad = DEG2RAD(flYaw);
-	Vec3 vCenter = Vec3(m_vOrigin.x, m_vOrigin.y, m_vHeadCenter.z);
+	Vec3 vCenter = Vec3(m_vViewPos.x, m_vViewPos.y, m_vHeadCenter.z);
 	return vCenter + Vec3(cosf(flRad) * m_flHeadRadius, sinf(flRad) * m_flHeadRadius, 0.f);
 }
 
@@ -1242,7 +1242,7 @@ void CFreestand::Render()
 		);
 	}
 
-	Vec3 vCircleCenter = Vec3(m_vOrigin.x, m_vOrigin.y, m_vHeadCenter.z);
+	Vec3 vCircleCenter = Vec3(m_vViewPos.x, m_vViewPos.y, m_vHeadCenter.z);
 
 	// Red line: from circle center to actual current head position
 	if (!m_vFinalHeadPos.IsZero())

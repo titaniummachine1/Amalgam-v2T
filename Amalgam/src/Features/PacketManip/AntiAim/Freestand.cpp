@@ -1,28 +1,6 @@
 #include "Freestand.h"
 
-#include "../../../SDK/Definitions/Definitions.h"
-#include "../../../SDK/Definitions/Interfaces/CGlobalVarsBase.h"
-#include "../../../SDK/Definitions/Interfaces/IVModelInfo.h"
-#include "../../../SDK/Definitions/Main/CBaseAnimating.h"
-#include "../../../SDK/Definitions/Main/CGameTrace.h"
-#include "../../../SDK/Definitions/Main/CMultiPlayerAnimState.h"
-#include "../../../SDK/Definitions/Main/CTFPlayer.h"
-#include "../../../SDK/Definitions/Main/CUserCmd.h"
-#include "../../../SDK/Definitions/Misc/BSPFlags.h"
-#include "../../../SDK/Definitions/Misc/Studio.h"
-#include "../../../SDK/Definitions/Types.h"
-#include "../../../SDK/Globals.h"
-#include "../../../SDK/Helpers/Entities/Entities.h"
-#include "../../../SDK/Helpers/TraceFilters/TraceFilters.h"
-#include "../../../SDK/SDK.h"
-#include "../../../SDK/Vars.h"
-#include "../../../Utils/Math/Math.h"
 #include "../../Players/PlayerUtils.h"
-#include <algorithm>
-#include <cfloat>
-#include <cmath>
-#include <string.h>
-#include <utility>
 
 static constexpr int HEAD_HITBOX = 0;
 static constexpr int MULTIPOINT_CORNERS = 8;
@@ -1253,13 +1231,12 @@ void CFreestand::Render()
 		);
 	}
 
-	// Purple line: final applied body yaw (where algorithm is currently aiming to hide head)
-	if (m_flFinalAppliedBodyYaw != 0.f)
+	// Purple line: where algorithm is aiming the head (should match green when working correctly)
+	if (m_bHasSafeYaw && !m_vThreats.empty())
 	{
-		const float flPurpleYaw = m_flFinalAppliedBodyYaw + m_flHeadYawOffset;
-		Vec3 vAppliedYawWorld = HeadPosForYaw(flPurpleYaw);
+		Vec3 vTargetYawWorld = HeadPosForYaw(m_flSafestYaw);
 		G::LineStorage.emplace_back(
-			std::pair<Vec3, Vec3>(vCircleCenter, vAppliedYawWorld),
+			std::pair<Vec3, Vec3>(vCircleCenter, vTargetYawWorld),
 			flExpiry, Color_t(255, 0, 255, 255), false
 		);
 	}

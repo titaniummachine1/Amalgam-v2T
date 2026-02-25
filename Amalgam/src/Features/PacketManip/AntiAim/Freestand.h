@@ -6,7 +6,7 @@ struct FreestandThreat_t
 {
 	CTFPlayer* m_pPlayer = nullptr;
 	Vec3 m_vEyePos = {};
-	float m_flDirToLocal = 0.f;
+	float m_flThreatYaw = 0.f;
 	std::vector<bool> m_bSampleHit = {};
 	int m_iHeadshotCount = 0;
 };
@@ -27,13 +27,14 @@ private:
 	float m_flHeadHeightOffset = 0.f;
 	float m_flCurrentBodyYaw = 0.f;
 	float m_flCurrentPitch = -89.f;
-	float m_flBestPitch = -89.f;
+	float m_flSafestPitch = -89.f;
 	float m_flHeadYawOffset = 0.f;
 	Vec3 m_vOrigin = {};
 	Vec3 m_vViewPos = {};
 	Vec3 m_vHeadCenter = {};
 
 	matrix3x4 m_aBones[MAXSTUDIOBONES] = {};
+	matrix3x4 m_aTempBones[MAXSTUDIOBONES] = {};  // Temporary bones to avoid stack overflow
 	bool m_bBonesSetup = false;
 	int m_iHeadBone = 0;
 	float m_flViewYaw = 0.f;
@@ -57,13 +58,15 @@ private:
 	
 	float m_flFinalAppliedBodyYaw = 0.f;
 	Vec3 m_vFinalHeadPos = {};
+	Vec3 m_vActualHeadPos = {};  // Store actual current head position for visualization
 
 	bool SetupBonesForYaw(CTFPlayer* pLocal, float flBodyYaw, matrix3x4* pBonesOut);
 	Vec3 GetHeadCenterFromBones(const matrix3x4* pBones) const;
+	bool CanPlayerHeadshot(CTFPlayer* pPlayer) const;  // Check if player's class and equipped weapon can perform headshots
 	float IntersectRayWithBox(const Vec3& vStart, const Vec3& vEnd, const Vec3& vMins, const Vec3& vMaxs, const matrix3x4& transform);
 	void GatherThreats(CTFPlayer* pLocal);
 	void ComputeHeadCircle(CTFPlayer* pLocal);
-	Vec3 HeadPosForYaw(float flYaw) const;
+	Vec3 GetHeadPosForYaw(float flYaw) const;
 	void ClearHeatmap(int iResolution);
 	void AccumulateThreatSample(float flYaw, float flThreatValue, int iResolution);
 	void AccumulateThreatSampleDual(float flYaw, float flThreatValue, int iResolution, bool bUpPitch);
@@ -71,13 +74,13 @@ private:
 	float GetNormalizedSafetyDual(float flYaw, int iResolution, bool bUpPitch) const;
 	void BuildHeatmap(float flDegreesPerSegment);
 	void BuildHeatmapVisualization(int iVisualSegments, float flDataDegreesPerSegment);
-	int MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& threat, float flTargetYaw);
-	int MultipointCheckDetailed(CTFPlayer* pLocal, const FreestandThreat_t& threat, float flTargetYaw, bool& bOutWorldBlocked, bool& bOutBodyBlocked);
+	int CountHeadHitsAtYaw(CTFPlayer* pLocal, const FreestandThreat_t& threat, float flTargetYaw);
+	int CountHeadHitsAtYawDetailed(CTFPlayer* pLocal, const FreestandThreat_t& threat, float flTargetYaw, bool& bOutWorldBlocked, bool& bOutBodyBlocked);
 	void RefineHeatmap(CTFPlayer* pLocal);
 	void SampleThreats(CTFPlayer* pLocal);
-	void SampleThreatsDual(CTFPlayer* pLocal);
+	void SampleThreatsAtBothPitches(CTFPlayer* pLocal);
 	float FindSafestYaw() const;
-	float FindSafestYawDual(bool& bOutUpPitch) const;
+	float FindSafestYawAndPitch(bool& bOutUpPitch) const;
 	float FindMostDangerousYaw() const;
 
 public:
@@ -86,7 +89,7 @@ public:
 	float GetSafestYaw() const { return m_flSafestYaw; }
 	float GetMostDangerousYaw() const { return m_flMostDangerousYaw; }
 	float SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHeadYaw, bool bStoreForVisualization = true);
-	float GetSecurePitch(CTFPlayer* pLocal);
+	float GetMaxBodyOffsetPitch(CTFPlayer* pLocal);
 	void Reset();
 
 	void Render();

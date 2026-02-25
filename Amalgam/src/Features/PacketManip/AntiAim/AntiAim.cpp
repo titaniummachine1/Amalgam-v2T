@@ -250,7 +250,7 @@ float CAntiAim::GetPitch(CTFPlayer* pLocal, float flCurPitch)
 	}
 	case Vars::AntiAim::PitchRealEnum::Auto:
 	{
-		flRealPitch = F::Freestand.GetSecurePitch(pLocal);
+		flRealPitch = F::Freestand.GetMaxBodyOffsetPitch(pLocal);
 		break;
 	}
 	}

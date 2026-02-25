@@ -39,6 +39,7 @@ void CFreestand::Reset()
 	m_flMostDangerousYaw = 0.f;
 	m_bHasSafeYaw = false;
 	m_bSafestIsBodyBlocked = false;
+	m_vActualHeadPos = Vec3();  // Reset actual head position
 
 	memset(m_aHeatmapThreat, 0, sizeof(m_aHeatmapThreat));
 	m_iTotalShotsAdded = 0;
@@ -56,8 +57,8 @@ void CFreestand::GatherThreats(CTFPlayer* pLocal)
 		if (F::PlayerUtils.IsIgnored(pPlayer->entindex()))
 			continue;
 
-		const int iClass = pPlayer->m_iClass();
-		if (iClass != TF_CLASS_SNIPER && iClass != TF_CLASS_SPY)
+		// Check if this player's current weapon can perform headshots
+		if (!CanPlayerHeadshot(pPlayer))
 			continue;
 
 		const float flDist = pLocal->m_vecOrigin().DistTo(pPlayer->m_vecOrigin());
@@ -72,7 +73,7 @@ void CFreestand::GatherThreats(CTFPlayer* pLocal)
 		Vec3 vDelta = pPlayer->m_vecOrigin() - pLocal->m_vecOrigin();
 		vDelta.z = 0.f;
 		const float flLen = vDelta.Length();
-		threat.m_flDirToLocal = (flLen > 1.f) ? RAD2DEG(atan2f(vDelta.y, vDelta.x)) : 0.f;
+		threat.m_flThreatYaw = (flLen > 1.f) ? RAD2DEG(atan2f(vDelta.y, vDelta.x)) : 0.f;
 
 		m_vThreats.push_back(threat);
 	}
@@ -100,6 +101,7 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 	}
 
 	m_vHeadCenter = vHeadCenter;
+	m_vActualHeadPos = vHeadCenter;  // Store actual current head position for visualization
 
 	{
 		auto pModel = pLocal->GetModel();
@@ -118,13 +120,12 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 	}
 
 	// Test pitch up (-89)
-	matrix3x4 tempBonesUp[MAXSTUDIOBONES];
 	float flOldPitch = m_flCurrentPitch;
 	m_flCurrentPitch = -89.f;
 	float flRadiusUp = flRadiusAtCurrentPitch;
-	if (SetupBonesForYaw(pLocal, m_flCurrentBodyYaw, tempBonesUp))
+	if (SetupBonesForYaw(pLocal, m_flCurrentBodyYaw, m_aTempBones))
 	{
-		Vec3 vHeadUp = pLocal->As<CBaseAnimating>()->GetHitboxCenter(tempBonesUp, HEAD_HITBOX);
+		Vec3 vHeadUp = pLocal->As<CBaseAnimating>()->GetHitboxCenter(m_aTempBones, HEAD_HITBOX);
 		if (!vHeadUp.IsZero())
 		{
 			Vec3 vDeltaUp = vHeadUp - m_vViewPos;
@@ -134,12 +135,11 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 	}
 
 	// Test pitch down (89)
-	matrix3x4 tempBonesDown[MAXSTUDIOBONES];
 	m_flCurrentPitch = 89.f;
 	float flRadiusDown = flRadiusAtCurrentPitch;
-	if (SetupBonesForYaw(pLocal, m_flCurrentBodyYaw, tempBonesDown))
+	if (SetupBonesForYaw(pLocal, m_flCurrentBodyYaw, m_aTempBones))
 	{
-		Vec3 vHeadDown = pLocal->As<CBaseAnimating>()->GetHitboxCenter(tempBonesDown, HEAD_HITBOX);
+		Vec3 vHeadDown = pLocal->As<CBaseAnimating>()->GetHitboxCenter(m_aTempBones, HEAD_HITBOX);
 		if (!vHeadDown.IsZero())
 		{
 			Vec3 vDeltaDown = vHeadDown - m_vViewPos;
@@ -150,7 +150,7 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 	m_flCurrentPitch = flOldPitch;
 
 	// Use maximum radius to ensure circle encompasses all possible head positions
-	m_flHeadRadius = std::max({flRadiusAtCurrentPitch, flRadiusUp, flRadiusDown});
+	m_flHeadRadius = std::max({ flRadiusAtCurrentPitch, flRadiusUp, flRadiusDown });
 
 	if (m_flHeadRadius < 10.f)
 		m_flHeadRadius = 10.f;
@@ -166,14 +166,13 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 	));
 	m_flHeadYawOffset = Math::NormalizeAngle(flActualHeadYaw - m_flViewYaw);
 
-	matrix3x4 iterBones[MAXSTUDIOBONES];
 	for (int i = 0; i < 5; i++)
 	{
 		const float flTestBodyYaw = m_flViewYaw + m_flHeadYawOffset;
-		if (!SetupBonesForYaw(pLocal, flTestBodyYaw, iterBones))
+		if (!SetupBonesForYaw(pLocal, flTestBodyYaw, m_aTempBones))
 			break;
 
-		Vec3 vTestHeadCenter = pLocal->As<CBaseAnimating>()->GetHitboxCenter(iterBones, HEAD_HITBOX);
+		Vec3 vTestHeadCenter = pLocal->As<CBaseAnimating>()->GetHitboxCenter(m_aTempBones, HEAD_HITBOX);
 		if (vTestHeadCenter.IsZero())
 			break;
 
@@ -229,6 +228,41 @@ Vec3 CFreestand::GetHeadCenterFromBones(const matrix3x4* pBones) const
 
 	return Vec3(pBones[m_iHeadBone][0][3], pBones[m_iHeadBone][1][3], pBones[m_iHeadBone][2][3]);
 }
+
+bool CFreestand::CanPlayerHeadshot(CTFPlayer* pPlayer) const
+{
+	if (!pPlayer)
+		return false;
+
+	const int iClass = pPlayer->m_iClass();
+
+	// First: Check if this CLASS can headshot
+	if (iClass == TF_CLASS_SNIPER)
+	{
+		// Sniper CAN headshot - check if holding PRIMARY weapon
+		auto pWeapon = pPlayer->m_hActiveWeapon();
+		if (!pWeapon)
+			return false;
+
+		auto pPrimary = pPlayer->GetWeaponFromSlot(SLOT_PRIMARY);
+		return pWeapon == pPrimary;
+	}
+
+	if (iClass == TF_CLASS_SPY)
+	{
+		// Spy CAN headshot - check if holding SECONDARY weapon (Ambassador)
+		auto pWeapon = pPlayer->m_hActiveWeapon();
+		if (!pWeapon)
+			return false;
+
+		auto pSecondary = pPlayer->GetWeaponFromSlot(SLOT_SECONDARY);
+		return pWeapon == pSecondary;
+	}
+
+	// All other classes cannot headshot
+	return false;
+}
+
 
 float CFreestand::IntersectRayWithBox(const Vec3& vStart, const Vec3& vEnd, const Vec3& vMins, const Vec3& vMaxs, const matrix3x4& transform)
 {
@@ -303,7 +337,7 @@ float CFreestand::IntersectRayWithBox(const Vec3& vStart, const Vec3& vEnd, cons
 	return tmin;
 }
 
-Vec3 CFreestand::HeadPosForYaw(float flYaw) const
+Vec3 CFreestand::GetHeadPosForYaw(float flYaw) const
 {
 	float flRad = DEG2RAD(flYaw);
 	Vec3 vCenter = Vec3(m_vViewPos.x, m_vViewPos.y, m_vHeadCenter.z);
@@ -332,7 +366,7 @@ float CFreestand::SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHea
 	return flBodyYaw;
 }
 
-float CFreestand::GetSecurePitch(CTFPlayer* pLocal)
+float CFreestand::GetMaxBodyOffsetPitch(CTFPlayer* pLocal)
 {
 	if (!pLocal)
 		return -89.f;
@@ -342,7 +376,6 @@ float CFreestand::GetSecurePitch(CTFPlayer* pLocal)
 		return -89.f;
 
 	const Vec3 vBodyCenter = pLocal->m_vecOrigin();
-	matrix3x4 tempBones[MAXSTUDIOBONES];
 
 	const float flOldFrameTime = I::GlobalVars->frametime;
 	const int nOldSequence = pLocal->m_nSequence();
@@ -354,14 +387,14 @@ float CFreestand::GetSecurePitch(CTFPlayer* pLocal)
 	I::GlobalVars->frametime = 0.f;
 	pAnimState->Update(pAnimState->m_flCurrentFeetYaw, -89.f);
 	pLocal->InvalidateBoneCache();
-	const bool bUpSuccess = pLocal->SetupBones(tempBones, MAXSTUDIOBONES, BONE_USED_BY_ANYTHING, I::GlobalVars->curtime);
-	const Vec3 vHeadCenterUp = bUpSuccess ? GetHeadCenterFromBones(tempBones) : Vec3();
+	const bool bUpSuccess = pLocal->SetupBones(m_aTempBones, MAXSTUDIOBONES, BONE_USED_BY_ANYTHING, I::GlobalVars->curtime);
+	const Vec3 vHeadCenterUp = bUpSuccess ? GetHeadCenterFromBones(m_aTempBones) : Vec3();
 
 	memcpy(pAnimState, pOldAnimState, sizeof(CTFPlayerAnimState));
 	pAnimState->Update(pAnimState->m_flCurrentFeetYaw, 89.f);
 	pLocal->InvalidateBoneCache();
-	const bool bDownSuccess = pLocal->SetupBones(tempBones, MAXSTUDIOBONES, BONE_USED_BY_ANYTHING, I::GlobalVars->curtime);
-	const Vec3 vHeadCenterDown = bDownSuccess ? GetHeadCenterFromBones(tempBones) : Vec3();
+	const bool bDownSuccess = pLocal->SetupBones(m_aTempBones, MAXSTUDIOBONES, BONE_USED_BY_ANYTHING, I::GlobalVars->curtime);
+	const Vec3 vHeadCenterDown = bDownSuccess ? GetHeadCenterFromBones(m_aTempBones) : Vec3();
 
 	I::GlobalVars->frametime = flOldFrameTime;
 	pLocal->m_nSequence() = nOldSequence;
@@ -420,7 +453,6 @@ void CFreestand::SampleThreats(CTFPlayer* pLocal)
 		Vec3(flHalfX,  flHalfY, -flHalfZ)
 	};
 
-	matrix3x4 tempBones[MAXSTUDIOBONES];
 	const int iInitialSegments = Vars::AntiAim::FreestandInitialSegments.Value;
 	const float flSegmentStep = 360.f / static_cast<float>(iInitialSegments);
 
@@ -430,10 +462,10 @@ void CFreestand::SampleThreats(CTFPlayer* pLocal)
 
 		for (int s = 0; s < iInitialSegments; s++)
 		{
-			const float flSampleYaw = threat.m_flDirToLocal + (flSegmentStep * static_cast<float>(s));
-			const float flBodyYaw = SolveBodyYawForHeadTarget(pLocal, flSampleYaw);
+			const float flSampleYaw = threat.m_flThreatYaw + (flSegmentStep * static_cast<float>(s));
+			const float flBodyYaw = SolveBodyYawForHeadTarget(pLocal, flSampleYaw, false);
 
-			if (!SetupBonesForYaw(pLocal, flBodyYaw, tempBones))
+			if (!SetupBonesForYaw(pLocal, flBodyYaw, m_aTempBones))
 			{
 				threat.m_bSampleHit[s] = false;
 				continue;
@@ -444,7 +476,7 @@ void CFreestand::SampleThreats(CTFPlayer* pLocal)
 			filter.m_iTeam = threat.m_pPlayer->m_iTeamNum();
 
 			Vec3 vHeadCenter;
-			Math::VectorTransform(Vec3(0, 0, 0), tempBones[iBone], vHeadCenter);
+			Math::VectorTransform(Vec3(0, 0, 0), m_aTempBones[iBone], vHeadCenter);
 
 			CGameTrace trace = {};
 			SDK::Trace(threat.m_vEyePos, vHeadCenter, MASK_SHOT | CONTENTS_GRATE, &filter, &trace);
@@ -466,7 +498,7 @@ void CFreestand::SampleThreats(CTFPlayer* pLocal)
 					if (!pHitbox)
 						continue;
 
-					const float flDist = IntersectRayWithBox(threat.m_vEyePos, vHeadCenter, pHitbox->bbmin, pHitbox->bbmax, tempBones[pHitbox->bone]);
+					const float flDist = IntersectRayWithBox(threat.m_vEyePos, vHeadCenter, pHitbox->bbmin, pHitbox->bbmax, m_aTempBones[pHitbox->bone]);
 					if (flDist >= 0.f && flDist < flClosestHit)
 						flClosestHit = flDist;
 				}
@@ -485,7 +517,7 @@ void CFreestand::SampleThreats(CTFPlayer* pLocal)
 			for (int c = 0; c < MULTIPOINT_CORNERS; c++)
 			{
 				Vec3 vWorld;
-				Math::VectorTransform(vLocalCorners[c], tempBones[iBone], vWorld);
+				Math::VectorTransform(vLocalCorners[c], m_aTempBones[iBone], vWorld);
 
 				SDK::Trace(threat.m_vEyePos, vWorld, MASK_SHOT | CONTENTS_GRATE, &filter, &trace);
 
@@ -506,7 +538,7 @@ void CFreestand::SampleThreats(CTFPlayer* pLocal)
 						if (!pHitbox)
 							continue;
 
-						const float flDist = IntersectRayWithBox(threat.m_vEyePos, vWorld, pHitbox->bbmin, pHitbox->bbmax, tempBones[pHitbox->bone]);
+						const float flDist = IntersectRayWithBox(threat.m_vEyePos, vWorld, pHitbox->bbmin, pHitbox->bbmax, m_aTempBones[pHitbox->bone]);
 						if (flDist >= 0.f && flDist < flClosestHit)
 							flClosestHit = flDist;
 					}
@@ -568,8 +600,9 @@ float CFreestand::GetNormalizedSafety(float flYaw, int iResolution) const
 
 	const int iSize = std::min(iResolution, MAX_HEATMAP_RESOLUTION);
 	const float flStep = 360.f / static_cast<float>(iSize);
-	const float flNormYaw = Math::NormalizeAngle(flYaw) + 180.f;
-	const float flIndex = flNormYaw / flStep;
+	// FIX: Segment yaw ranges from -180 to +180, so index calculation must match
+	// flYaw = -180 corresponds to index 0, flYaw = +180 corresponds to index iSize-1
+	const float flIndex = (flYaw + 180.f) / flStep;
 	const int iIndex0 = static_cast<int>(floorf(flIndex)) % iSize;
 	const int iIndex1 = (iIndex0 + 1) % iSize;
 	const float flFrac = flIndex - floorf(flIndex);
@@ -613,8 +646,8 @@ float CFreestand::GetNormalizedSafetyDual(float flYaw, int iResolution, bool bUp
 	const float* pHeatmap = bUpPitch ? m_aHeatmapThreatUp : m_aHeatmapThreatDown;
 	const int iSize = std::min(iResolution, MAX_HEATMAP_RESOLUTION);
 	const float flStep = 360.f / static_cast<float>(iSize);
-	const float flNormYaw = Math::NormalizeAngle(flYaw) + 180.f;
-	const float flIndex = flNormYaw / flStep;
+	// FIX: Match AccumulateThreatSampleDual's -180 to +180 segment layout
+	const float flIndex = (flYaw + 180.f) / flStep;
 	const int iIndex0 = static_cast<int>(floorf(flIndex)) % iSize;
 	const int iIndex1 = (iIndex0 + 1) % iSize;
 	const float flFrac = flIndex - floorf(flIndex);
@@ -643,7 +676,7 @@ void CFreestand::BuildHeatmap(float flDegreesPerSegment)
 		{
 			if (threat.m_bSampleHit[s])
 			{
-				const float flSampleYaw = threat.m_flDirToLocal + (flSegmentStep * static_cast<float>(s));
+				const float flSampleYaw = threat.m_flThreatYaw + (flSegmentStep * static_cast<float>(s));
 				AccumulateThreatSample(flSampleYaw, 1.f, iResolution);
 			}
 		}
@@ -664,7 +697,7 @@ void CFreestand::BuildHeatmapVisualization(int iVisualSegments, float flDataDegr
 
 		HeatmapPoint_t point;
 		point.m_flYawAngle = flYaw;
-		point.m_vHeadPos = HeadPosForYaw(flYaw);
+		point.m_vHeadPos = GetHeadPosForYaw(flYaw);
 		point.m_flSafety = GetNormalizedSafety(flYaw, iDataResolution);
 		point.m_iHitsOut8 = -1;
 		point.m_bVerified = false;
@@ -673,7 +706,7 @@ void CFreestand::BuildHeatmapVisualization(int iVisualSegments, float flDataDegr
 	}
 }
 
-int CFreestand::MultipointCheckDetailed(CTFPlayer* pLocal, const FreestandThreat_t& threat, float flTargetYaw, bool& bOutWorldBlocked, bool& bOutBodyBlocked)
+int CFreestand::CountHeadHitsAtYawDetailed(CTFPlayer* pLocal, const FreestandThreat_t& threat, float flTargetYaw, bool& bOutWorldBlocked, bool& bOutBodyBlocked)
 {
 	auto pModel = pLocal->GetModel();
 	if (!pModel) return 0;
@@ -690,8 +723,7 @@ int CFreestand::MultipointCheckDetailed(CTFPlayer* pLocal, const FreestandThreat
 
 	const float flBodyYaw = SolveBodyYawForHeadTarget(pLocal, flTargetYaw);
 
-	matrix3x4 tempBones[MAXSTUDIOBONES];
-	if (!SetupBonesForYaw(pLocal, flBodyYaw, tempBones))
+	if (!SetupBonesForYaw(pLocal, flBodyYaw, m_aTempBones))
 		return 0;
 
 	const float flHalfX = (vHeadMaxs.x - vHeadMins.x) * 0.5f;
@@ -719,7 +751,7 @@ int CFreestand::MultipointCheckDetailed(CTFPlayer* pLocal, const FreestandThreat
 	for (int c = 0; c < MULTIPOINT_CORNERS; c++)
 	{
 		Vec3 vHeadWorld;
-		Math::VectorTransform(vLocalCorners[c], tempBones[iHeadBone], vHeadWorld);
+		Math::VectorTransform(vLocalCorners[c], m_aTempBones[iHeadBone], vHeadWorld);
 
 		CGameTrace trace = {};
 		SDK::Trace(threat.m_vEyePos, vHeadWorld, MASK_SHOT | CONTENTS_GRATE, &filter, &trace);
@@ -741,7 +773,7 @@ int CFreestand::MultipointCheckDetailed(CTFPlayer* pLocal, const FreestandThreat
 				if (!pHitbox)
 					continue;
 
-				const float flDist = IntersectRayWithBox(threat.m_vEyePos, vHeadWorld, pHitbox->bbmin, pHitbox->bbmax, tempBones[pHitbox->bone]);
+				const float flDist = IntersectRayWithBox(threat.m_vEyePos, vHeadWorld, pHitbox->bbmin, pHitbox->bbmax, m_aTempBones[pHitbox->bone]);
 				if (flDist >= 0.f && flDist < flClosestHit)
 					flClosestHit = flDist;
 			}
@@ -763,7 +795,7 @@ int CFreestand::MultipointCheckDetailed(CTFPlayer* pLocal, const FreestandThreat
 	return iHits;
 }
 
-int CFreestand::MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& threat, float flTargetYaw)
+int CFreestand::CountHeadHitsAtYaw(CTFPlayer* pLocal, const FreestandThreat_t& threat, float flTargetYaw)
 {
 	if (!m_bBonesSetup) return 0;
 
@@ -782,8 +814,7 @@ int CFreestand::MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& thre
 
 	const float flBodyYaw = SolveBodyYawForHeadTarget(pLocal, flTargetYaw);
 
-	matrix3x4 tempBones[MAXSTUDIOBONES];
-	if (!SetupBonesForYaw(pLocal, flBodyYaw, tempBones))
+	if (!SetupBonesForYaw(pLocal, flBodyYaw, m_aTempBones))
 		return 0;
 
 	const float flHalfX = (vHeadMaxs.x - vHeadMins.x) * 0.5f;
@@ -809,7 +840,7 @@ int CFreestand::MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& thre
 	for (int c = 0; c < MULTIPOINT_CORNERS; c++)
 	{
 		Vec3 vHeadWorld;
-		Math::VectorTransform(vLocalCorners[c], tempBones[iHeadBone], vHeadWorld);
+		Math::VectorTransform(vLocalCorners[c], m_aTempBones[iHeadBone], vHeadWorld);
 
 		CGameTrace trace = {};
 		SDK::Trace(threat.m_vEyePos, vHeadWorld, MASK_SHOT | CONTENTS_GRATE, &filter, &trace);
@@ -831,7 +862,7 @@ int CFreestand::MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& thre
 				if (!pHitbox)
 					continue;
 
-				const float flDist = IntersectRayWithBox(threat.m_vEyePos, vHeadWorld, pHitbox->bbmin, pHitbox->bbmax, tempBones[pHitbox->bone]);
+				const float flDist = IntersectRayWithBox(threat.m_vEyePos, vHeadWorld, pHitbox->bbmin, pHitbox->bbmax, m_aTempBones[pHitbox->bone]);
 				if (flDist >= 0.f && flDist < flClosestHit)
 					flClosestHit = flDist;
 			}
@@ -874,7 +905,7 @@ void CFreestand::RefineHeatmap(CTFPlayer* pLocal)
 
 		int iTotalHits = 0;
 		for (auto& threat : m_vThreats)
-			iTotalHits += MultipointCheck(pLocal, threat, bestPoint.m_flYawAngle);
+			iTotalHits += CountHeadHitsAtYaw(pLocal, threat, bestPoint.m_flYawAngle);
 
 		bestPoint.m_iHitsOut8 = iTotalHits;
 
@@ -936,7 +967,7 @@ float CFreestand::FindMostDangerousYaw() const
 	return flWorstYaw;
 }
 
-void CFreestand::SampleThreatsDual(CTFPlayer* pLocal)
+void CFreestand::SampleThreatsAtBothPitches(CTFPlayer* pLocal)
 {
 	if (!m_bBonesSetup) return;
 
@@ -967,7 +998,6 @@ void CFreestand::SampleThreatsDual(CTFPlayer* pLocal)
 		Vec3(flHalfX,  flHalfY, -flHalfZ)
 	};
 
-	matrix3x4 tempBones[MAXSTUDIOBONES];
 	const int iInitialSegments = Vars::AntiAim::FreestandInitialSegments.Value;
 	const float flSegmentStep = 360.f / static_cast<float>(iInitialSegments);
 	const float flOldPitch = m_flCurrentPitch;
@@ -984,10 +1014,10 @@ void CFreestand::SampleThreatsDual(CTFPlayer* pLocal)
 
 			for (int s = 0; s < iInitialSegments; s++)
 			{
-				const float flSampleYaw = threat.m_flDirToLocal + (flSegmentStep * static_cast<float>(s));
-				const float flBodyYaw = SolveBodyYawForHeadTarget(pLocal, flSampleYaw);
+				const float flSampleYaw = threat.m_flThreatYaw + (flSegmentStep * static_cast<float>(s));
+				const float flBodyYaw = SolveBodyYawForHeadTarget(pLocal, flSampleYaw, false);
 
-				if (!SetupBonesForYaw(pLocal, flBodyYaw, tempBones))
+				if (!SetupBonesForYaw(pLocal, flBodyYaw, m_aTempBones))
 				{
 					threat.m_bSampleHit[s] = false;
 					continue;
@@ -998,7 +1028,7 @@ void CFreestand::SampleThreatsDual(CTFPlayer* pLocal)
 				filter.m_iTeam = threat.m_pPlayer->m_iTeamNum();
 
 				Vec3 vHeadCenter;
-				Math::VectorTransform(Vec3(0, 0, 0), tempBones[iBone], vHeadCenter);
+				Math::VectorTransform(Vec3(0, 0, 0), m_aTempBones[iBone], vHeadCenter);
 
 				CGameTrace trace = {};
 				SDK::Trace(threat.m_vEyePos, vHeadCenter, MASK_SHOT | CONTENTS_GRATE, &filter, &trace);
@@ -1020,7 +1050,7 @@ void CFreestand::SampleThreatsDual(CTFPlayer* pLocal)
 						if (!pHitbox)
 							continue;
 
-						const float flDist = IntersectRayWithBox(threat.m_vEyePos, vHeadCenter, pHitbox->bbmin, pHitbox->bbmax, tempBones[pHitbox->bone]);
+						const float flDist = IntersectRayWithBox(threat.m_vEyePos, vHeadCenter, pHitbox->bbmin, pHitbox->bbmax, m_aTempBones[pHitbox->bone]);
 						if (flDist >= 0.f && flDist < flClosestHit)
 							flClosestHit = flDist;
 					}
@@ -1039,7 +1069,7 @@ void CFreestand::SampleThreatsDual(CTFPlayer* pLocal)
 				for (int c = 0; c < MULTIPOINT_CORNERS; c++)
 				{
 					Vec3 vWorld;
-					Math::VectorTransform(vLocalCorners[c], tempBones[iBone], vWorld);
+					Math::VectorTransform(vLocalCorners[c], m_aTempBones[iBone], vWorld);
 
 					SDK::Trace(threat.m_vEyePos, vWorld, MASK_SHOT | CONTENTS_GRATE, &filter, &trace);
 
@@ -1060,7 +1090,7 @@ void CFreestand::SampleThreatsDual(CTFPlayer* pLocal)
 							if (!pHitbox)
 								continue;
 
-							const float flDist = IntersectRayWithBox(threat.m_vEyePos, vWorld, pHitbox->bbmin, pHitbox->bbmax, tempBones[pHitbox->bone]);
+							const float flDist = IntersectRayWithBox(threat.m_vEyePos, vWorld, pHitbox->bbmin, pHitbox->bbmax, m_aTempBones[pHitbox->bone]);
 							if (flDist >= 0.f && flDist < flClosestHit)
 								flClosestHit = flDist;
 						}
@@ -1086,7 +1116,7 @@ void CFreestand::SampleThreatsDual(CTFPlayer* pLocal)
 			{
 				if (threat.m_bSampleHit[s])
 				{
-					const float flSampleYaw = threat.m_flDirToLocal + (flSegmentStep * static_cast<float>(s));
+					const float flSampleYaw = threat.m_flThreatYaw + (flSegmentStep * static_cast<float>(s));
 					AccumulateThreatSampleDual(flSampleYaw, 1.f, iResolution, bUpPitch);
 				}
 			}
@@ -1096,7 +1126,7 @@ void CFreestand::SampleThreatsDual(CTFPlayer* pLocal)
 	m_flCurrentPitch = flOldPitch;
 }
 
-float CFreestand::FindSafestYawDual(bool& bOutUpPitch) const
+float CFreestand::FindSafestYawAndPitch(bool& bOutUpPitch) const
 {
 	const int iResolution = static_cast<int>(360.f / Vars::AntiAim::FreestandDegreesPerSegment.Value);
 	const float flStep = 360.f / static_cast<float>(iResolution);
@@ -1154,22 +1184,22 @@ void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd, float flPitch)
 		const int iResolution = static_cast<int>(360.f / flDegreesPerSegment);
 		ClearHeatmap(iResolution);
 
-		SampleThreatsDual(pLocal);
+		SampleThreatsAtBothPitches(pLocal);
 
 		const int iMaxIterations = Vars::AntiAim::FreestandIterations.Value;
 		bool bFoundSafe = false;
 		for (int iter = 0; iter < iMaxIterations; iter++)
 		{
 			bool bUpPitch = true;
-			m_flSafestYaw = FindSafestYawDual(bUpPitch);
-			m_flBestPitch = bUpPitch ? -89.f : 89.f;
+			m_flSafestYaw = FindSafestYawAndPitch(bUpPitch);
+			m_flSafestPitch = bUpPitch ? -89.f : 89.f;
 
 			const float flOldPitch = m_flCurrentPitch;
-			m_flCurrentPitch = m_flBestPitch;
+			m_flCurrentPitch = m_flSafestPitch;
 
 			int iTotalHits = 0;
 			for (auto& threat : m_vThreats)
-				iTotalHits += MultipointCheck(pLocal, threat, m_flSafestYaw);
+				iTotalHits += CountHeadHitsAtYaw(pLocal, threat, m_flSafestYaw);
 
 			m_flCurrentPitch = flOldPitch;
 
@@ -1228,7 +1258,7 @@ void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd, float flPitch)
 			{
 				bool bWorldBlocked = false;
 				bool bBodyBlocked = false;
-				const int iHits = MultipointCheckDetailed(pLocal, threat, m_flSafestYaw, bWorldBlocked, bBodyBlocked);
+				const int iHits = CountHeadHitsAtYawDetailed(pLocal, threat, m_flSafestYaw, bWorldBlocked, bBodyBlocked);
 
 				if (iHits == 0)
 				{
@@ -1284,28 +1314,18 @@ void CFreestand::Render()
 	Vec3 vCircleCenter = Vec3(m_vViewPos.x, m_vViewPos.y, m_vHeadCenter.z);
 
 	// Red line: from circle center to actual current head position
-	if (!m_vFinalHeadPos.IsZero())
+	if (!m_vActualHeadPos.IsZero())
 	{
 		G::LineStorage.emplace_back(
-			std::pair<Vec3, Vec3>(vCircleCenter, m_vFinalHeadPos),
+			std::pair<Vec3, Vec3>(vCircleCenter, m_vActualHeadPos),
 			flExpiry, Color_t(255, 0, 0, 255), false
-		);
-	}
-
-	// Purple line: where algorithm is aiming the head (should match green when working correctly)
-	if (m_bHasSafeYaw && !m_vThreats.empty())
-	{
-		Vec3 vTargetYawWorld = HeadPosForYaw(m_flSafestYaw);
-		G::LineStorage.emplace_back(
-			std::pair<Vec3, Vec3>(vCircleCenter, vTargetYawWorld),
-			flExpiry, Color_t(255, 0, 255, 255), false
 		);
 	}
 
 	// Green/Orange line: safest yaw found (where head should be for maximum safety)
 	if (!m_vThreats.empty() && m_bHasSafeYaw)
 	{
-		Vec3 vBestWorld = HeadPosForYaw(m_flSafestYaw);
+		Vec3 vBestWorld = GetHeadPosForYaw(m_flSafestYaw);
 		Color_t tLineColor;
 		if (m_bSafestIsBodyBlocked)
 			tLineColor = Color_t(255, 165, 0, 255); // Orange: body-blocked

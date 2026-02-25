@@ -274,11 +274,11 @@ Vec3 CFreestand::HeadPosForYaw(float flYaw) const
 float CFreestand::SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHeadYaw, bool bStoreForVisualization)
 {
 	const float flBodyYaw = Math::NormalizeAngle(flTargetHeadYaw - m_flHeadYawOffset);
-	
+
 	if (bStoreForVisualization)
 	{
 		m_flFinalAppliedBodyYaw = flBodyYaw;
-		
+
 		matrix3x4 finalBones[MAXSTUDIOBONES];
 		if (SetupBonesForYaw(pLocal, flBodyYaw, finalBones))
 		{
@@ -289,7 +289,7 @@ float CFreestand::SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHea
 			m_vFinalHeadPos = m_vHeadCenter;
 		}
 	}
-	
+
 	return flBodyYaw;
 }
 

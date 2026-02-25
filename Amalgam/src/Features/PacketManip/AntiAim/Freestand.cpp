@@ -271,20 +271,23 @@ Vec3 CFreestand::HeadPosForYaw(float flYaw) const
 	return vCenter + Vec3(cosf(flRad) * m_flHeadRadius, sinf(flRad) * m_flHeadRadius, 0.f);
 }
 
-float CFreestand::SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHeadYaw)
+float CFreestand::SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHeadYaw, bool bStoreForVisualization)
 {
 	const float flBodyYaw = Math::NormalizeAngle(flTargetHeadYaw - m_flHeadYawOffset);
 	
-	m_flFinalAppliedBodyYaw = flBodyYaw;
-	
-	matrix3x4 finalBones[MAXSTUDIOBONES];
-	if (SetupBonesForYaw(pLocal, flBodyYaw, finalBones))
+	if (bStoreForVisualization)
 	{
-		m_vFinalHeadPos = pLocal->As<CBaseAnimating>()->GetHitboxCenter(finalBones, HEAD_HITBOX);
-	}
-	else
-	{
-		m_vFinalHeadPos = m_vHeadCenter;
+		m_flFinalAppliedBodyYaw = flBodyYaw;
+		
+		matrix3x4 finalBones[MAXSTUDIOBONES];
+		if (SetupBonesForYaw(pLocal, flBodyYaw, finalBones))
+		{
+			m_vFinalHeadPos = pLocal->As<CBaseAnimating>()->GetHitboxCenter(finalBones, HEAD_HITBOX);
+		}
+		else
+		{
+			m_vFinalHeadPos = m_vHeadCenter;
+		}
 	}
 	
 	return flBodyYaw;

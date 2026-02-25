@@ -85,7 +85,7 @@ public:
 	bool HasSafeYaw() const { return m_bHasSafeYaw; }
 	float GetSafestYaw() const { return m_flSafestYaw; }
 	float GetMostDangerousYaw() const { return m_flMostDangerousYaw; }
-	float SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHeadYaw);
+	float SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHeadYaw, bool bStoreForVisualization = true);
 	float GetSecurePitch(CTFPlayer* pLocal);
 	void Reset();
 

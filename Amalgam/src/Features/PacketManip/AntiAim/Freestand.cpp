@@ -56,10 +56,6 @@ void CFreestand::GatherThreats(CTFPlayer* pLocal)
 		if (F::PlayerUtils.IsIgnored(pPlayer->entindex()))
 			continue;
 
-		const int iClass = pPlayer->m_iClass();
-		if (iClass != TF_CLASS_SNIPER && iClass != TF_CLASS_SPY)
-			continue;
-
 		const float flDist = pLocal->m_vecOrigin().DistTo(pPlayer->m_vecOrigin());
 		if (flDist > THREAT_MAX_DISTANCE)
 			continue;

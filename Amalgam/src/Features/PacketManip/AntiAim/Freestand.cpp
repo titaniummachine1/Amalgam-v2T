@@ -56,6 +56,10 @@ void CFreestand::GatherThreats(CTFPlayer* pLocal)
 		if (F::PlayerUtils.IsIgnored(pPlayer->entindex()))
 			continue;
 
+		const int iClass = pPlayer->m_iClass();
+		if (iClass != TF_CLASS_SNIPER && iClass != TF_CLASS_SPY)
+			continue;
+
 		const float flDist = pLocal->m_vecOrigin().DistTo(pPlayer->m_vecOrigin());
 		if (flDist > THREAT_MAX_DISTANCE)
 			continue;
@@ -1072,6 +1076,7 @@ void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd, float flPitch)
 		SampleThreatsDual(pLocal);
 
 		const int iMaxIterations = Vars::AntiAim::FreestandIterations.Value;
+		bool bFoundSafe = false;
 		for (int iter = 0; iter < iMaxIterations; iter++)
 		{
 			bool bUpPitch = true;
@@ -1088,11 +1093,15 @@ void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd, float flPitch)
 			m_flCurrentPitch = flOldPitch;
 
 			if (iTotalHits == 0)
+			{
+				bFoundSafe = true;
 				break;
+			}
 
 			AccumulateThreatSampleDual(m_flSafestYaw, 1.f, iResolution, bUpPitch);
 		}
 
+		m_bHasSafeYaw = bFoundSafe;
 		m_flMostDangerousYaw = 0.f;
 		BuildHeatmapVisualization(iVisualSegments, flDegreesPerSegment);
 	}

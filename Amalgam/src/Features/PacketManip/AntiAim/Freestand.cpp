@@ -741,13 +741,14 @@ int CFreestand::CountHeadHitsAtYawDetailed(CTFPlayer* pLocal, const FreestandThr
 		Vec3(flHalfX,  flHalfY, -flHalfZ)
 	};
 
-	int iHits = 0;
 	int iWorldBlocks = 0;
 	int iBodyBlocks = 0;
 	CTraceFilterHitscan filter;
 	filter.m_pSkip = pLocal;
 	filter.m_iTeam = threat.m_pPlayer->m_iTeamNum();
 
+	// Check each corner to see if yaw is exposed
+	// Return immediately if we find an exposed corner, don't check all 8 if not necesary
 	for (int c = 0; c < MULTIPOINT_CORNERS; c++)
 	{
 		Vec3 vHeadWorld;
@@ -787,12 +788,18 @@ int CFreestand::CountHeadHitsAtYawDetailed(CTFPlayer* pLocal, const FreestandThr
 		else if (bBlockedByBody)
 			iBodyBlocks++;
 		else
-			iHits++;
+		{
+			// Found an exposed corner - yaw is unsafe, set flags and return immediately
+			bOutWorldBlocked = false;
+			bOutBodyBlocked = false;
+			return 1;
+		}
 	}
 
+	// All corners are blocked (either by world or body)
 	bOutWorldBlocked = (iWorldBlocks == MULTIPOINT_CORNERS);
 	bOutBodyBlocked = (iBodyBlocks == MULTIPOINT_CORNERS);
-	return iHits;
+	return 0;
 }
 
 int CFreestand::CountHeadHitsAtYaw(CTFPlayer* pLocal, const FreestandThreat_t& threat, float flTargetYaw)
@@ -832,11 +839,12 @@ int CFreestand::CountHeadHitsAtYaw(CTFPlayer* pLocal, const FreestandThreat_t& t
 		Vec3(flHalfX,  flHalfY, -flHalfZ)
 	};
 
-	int iHits = 0;
 	CTraceFilterHitscan filter;
 	filter.m_pSkip = pLocal;
 	filter.m_iTeam = threat.m_pPlayer->m_iTeamNum();
 
+	// For freestand: we only care if ANY corner can be hit (not how many)
+	// Return 1 if yaw is exposed, 0 if completely blocked
 	for (int c = 0; c < MULTIPOINT_CORNERS; c++)
 	{
 		Vec3 vHeadWorld;
@@ -871,11 +879,12 @@ int CFreestand::CountHeadHitsAtYaw(CTFPlayer* pLocal, const FreestandThreat_t& t
 				bBlockedByBody = true;
 		}
 
+		// If ANY corner is exposed to this threat, yaw is unsafe
 		if (!bHitWorld && !bBlockedByBody)
-			iHits++;
+			return 1; // Yaw is exposed (BAIL IMMEDIATELY)
 	}
 
-	return iHits;
+	return 0; // All corners blocked or hit world (yaw is safe from this threat)
 }
 
 void CFreestand::RefineHeatmap(CTFPlayer* pLocal)

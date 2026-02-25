@@ -39,6 +39,7 @@ void CFreestand::Reset()
 	m_flMostDangerousYaw = 0.f;
 	m_bHasSafeYaw = false;
 	m_bSafestIsBodyBlocked = false;
+	m_vActualHeadPos = Vec3();  // Reset actual head position
 
 	memset(m_aHeatmapThreat, 0, sizeof(m_aHeatmapThreat));
 	m_iTotalShotsAdded = 0;
@@ -100,6 +101,7 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 	}
 
 	m_vHeadCenter = vHeadCenter;
+	m_vActualHeadPos = vHeadCenter;  // Store actual current head position for visualization
 
 	{
 		auto pModel = pLocal->GetModel();
@@ -118,13 +120,12 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 	}
 
 	// Test pitch up (-89)
-	matrix3x4 tempBonesUp[MAXSTUDIOBONES];
 	float flOldPitch = m_flCurrentPitch;
 	m_flCurrentPitch = -89.f;
 	float flRadiusUp = flRadiusAtCurrentPitch;
-	if (SetupBonesForYaw(pLocal, m_flCurrentBodyYaw, tempBonesUp))
+	if (SetupBonesForYaw(pLocal, m_flCurrentBodyYaw, m_aTempBones))
 	{
-		Vec3 vHeadUp = pLocal->As<CBaseAnimating>()->GetHitboxCenter(tempBonesUp, HEAD_HITBOX);
+		Vec3 vHeadUp = pLocal->As<CBaseAnimating>()->GetHitboxCenter(m_aTempBones, HEAD_HITBOX);
 		if (!vHeadUp.IsZero())
 		{
 			Vec3 vDeltaUp = vHeadUp - m_vViewPos;
@@ -134,12 +135,11 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 	}
 
 	// Test pitch down (89)
-	matrix3x4 tempBonesDown[MAXSTUDIOBONES];
 	m_flCurrentPitch = 89.f;
 	float flRadiusDown = flRadiusAtCurrentPitch;
-	if (SetupBonesForYaw(pLocal, m_flCurrentBodyYaw, tempBonesDown))
+	if (SetupBonesForYaw(pLocal, m_flCurrentBodyYaw, m_aTempBones))
 	{
-		Vec3 vHeadDown = pLocal->As<CBaseAnimating>()->GetHitboxCenter(tempBonesDown, HEAD_HITBOX);
+		Vec3 vHeadDown = pLocal->As<CBaseAnimating>()->GetHitboxCenter(m_aTempBones, HEAD_HITBOX);
 		if (!vHeadDown.IsZero())
 		{
 			Vec3 vDeltaDown = vHeadDown - m_vViewPos;
@@ -166,14 +166,13 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 	));
 	m_flHeadYawOffset = Math::NormalizeAngle(flActualHeadYaw - m_flViewYaw);
 
-	matrix3x4 iterBones[MAXSTUDIOBONES];
 	for (int i = 0; i < 5; i++)
 	{
 		const float flTestBodyYaw = m_flViewYaw + m_flHeadYawOffset;
-		if (!SetupBonesForYaw(pLocal, flTestBodyYaw, iterBones))
+		if (!SetupBonesForYaw(pLocal, flTestBodyYaw, m_aTempBones))
 			break;
 
-		Vec3 vTestHeadCenter = pLocal->As<CBaseAnimating>()->GetHitboxCenter(iterBones, HEAD_HITBOX);
+		Vec3 vTestHeadCenter = pLocal->As<CBaseAnimating>()->GetHitboxCenter(m_aTempBones, HEAD_HITBOX);
 		if (vTestHeadCenter.IsZero())
 			break;
 
@@ -342,7 +341,6 @@ float CFreestand::GetSecurePitch(CTFPlayer* pLocal)
 		return -89.f;
 
 	const Vec3 vBodyCenter = pLocal->m_vecOrigin();
-	matrix3x4 tempBones[MAXSTUDIOBONES];
 
 	const float flOldFrameTime = I::GlobalVars->frametime;
 	const int nOldSequence = pLocal->m_nSequence();
@@ -354,14 +352,14 @@ float CFreestand::GetSecurePitch(CTFPlayer* pLocal)
 	I::GlobalVars->frametime = 0.f;
 	pAnimState->Update(pAnimState->m_flCurrentFeetYaw, -89.f);
 	pLocal->InvalidateBoneCache();
-	const bool bUpSuccess = pLocal->SetupBones(tempBones, MAXSTUDIOBONES, BONE_USED_BY_ANYTHING, I::GlobalVars->curtime);
-	const Vec3 vHeadCenterUp = bUpSuccess ? GetHeadCenterFromBones(tempBones) : Vec3();
+	const bool bUpSuccess = pLocal->SetupBones(m_aTempBones, MAXSTUDIOBONES, BONE_USED_BY_ANYTHING, I::GlobalVars->curtime);
+	const Vec3 vHeadCenterUp = bUpSuccess ? GetHeadCenterFromBones(m_aTempBones) : Vec3();
 
 	memcpy(pAnimState, pOldAnimState, sizeof(CTFPlayerAnimState));
 	pAnimState->Update(pAnimState->m_flCurrentFeetYaw, 89.f);
 	pLocal->InvalidateBoneCache();
-	const bool bDownSuccess = pLocal->SetupBones(tempBones, MAXSTUDIOBONES, BONE_USED_BY_ANYTHING, I::GlobalVars->curtime);
-	const Vec3 vHeadCenterDown = bDownSuccess ? GetHeadCenterFromBones(tempBones) : Vec3();
+	const bool bDownSuccess = pLocal->SetupBones(m_aTempBones, MAXSTUDIOBONES, BONE_USED_BY_ANYTHING, I::GlobalVars->curtime);
+	const Vec3 vHeadCenterDown = bDownSuccess ? GetHeadCenterFromBones(m_aTempBones) : Vec3();
 
 	I::GlobalVars->frametime = flOldFrameTime;
 	pLocal->m_nSequence() = nOldSequence;
@@ -420,7 +418,6 @@ void CFreestand::SampleThreats(CTFPlayer* pLocal)
 		Vec3(flHalfX,  flHalfY, -flHalfZ)
 	};
 
-	matrix3x4 tempBones[MAXSTUDIOBONES];
 	const int iInitialSegments = Vars::AntiAim::FreestandInitialSegments.Value;
 	const float flSegmentStep = 360.f / static_cast<float>(iInitialSegments);
 
@@ -431,9 +428,9 @@ void CFreestand::SampleThreats(CTFPlayer* pLocal)
 		for (int s = 0; s < iInitialSegments; s++)
 		{
 			const float flSampleYaw = threat.m_flDirToLocal + (flSegmentStep * static_cast<float>(s));
-			const float flBodyYaw = SolveBodyYawForHeadTarget(pLocal, flSampleYaw);
+			const float flBodyYaw = SolveBodyYawForHeadTarget(pLocal, flSampleYaw, false);
 
-			if (!SetupBonesForYaw(pLocal, flBodyYaw, tempBones))
+			if (!SetupBonesForYaw(pLocal, flBodyYaw, m_aTempBones))
 			{
 				threat.m_bSampleHit[s] = false;
 				continue;
@@ -444,7 +441,7 @@ void CFreestand::SampleThreats(CTFPlayer* pLocal)
 			filter.m_iTeam = threat.m_pPlayer->m_iTeamNum();
 
 			Vec3 vHeadCenter;
-			Math::VectorTransform(Vec3(0, 0, 0), tempBones[iBone], vHeadCenter);
+			Math::VectorTransform(Vec3(0, 0, 0), m_aTempBones[iBone], vHeadCenter);
 
 			CGameTrace trace = {};
 			SDK::Trace(threat.m_vEyePos, vHeadCenter, MASK_SHOT | CONTENTS_GRATE, &filter, &trace);
@@ -466,7 +463,7 @@ void CFreestand::SampleThreats(CTFPlayer* pLocal)
 					if (!pHitbox)
 						continue;
 
-					const float flDist = IntersectRayWithBox(threat.m_vEyePos, vHeadCenter, pHitbox->bbmin, pHitbox->bbmax, tempBones[pHitbox->bone]);
+					const float flDist = IntersectRayWithBox(threat.m_vEyePos, vHeadCenter, pHitbox->bbmin, pHitbox->bbmax, m_aTempBones[pHitbox->bone]);
 					if (flDist >= 0.f && flDist < flClosestHit)
 						flClosestHit = flDist;
 				}
@@ -485,7 +482,7 @@ void CFreestand::SampleThreats(CTFPlayer* pLocal)
 			for (int c = 0; c < MULTIPOINT_CORNERS; c++)
 			{
 				Vec3 vWorld;
-				Math::VectorTransform(vLocalCorners[c], tempBones[iBone], vWorld);
+				Math::VectorTransform(vLocalCorners[c], m_aTempBones[iBone], vWorld);
 
 				SDK::Trace(threat.m_vEyePos, vWorld, MASK_SHOT | CONTENTS_GRATE, &filter, &trace);
 
@@ -506,7 +503,7 @@ void CFreestand::SampleThreats(CTFPlayer* pLocal)
 						if (!pHitbox)
 							continue;
 
-						const float flDist = IntersectRayWithBox(threat.m_vEyePos, vWorld, pHitbox->bbmin, pHitbox->bbmax, tempBones[pHitbox->bone]);
+						const float flDist = IntersectRayWithBox(threat.m_vEyePos, vWorld, pHitbox->bbmin, pHitbox->bbmax, m_aTempBones[pHitbox->bone]);
 						if (flDist >= 0.f && flDist < flClosestHit)
 							flClosestHit = flDist;
 					}
@@ -690,8 +687,7 @@ int CFreestand::MultipointCheckDetailed(CTFPlayer* pLocal, const FreestandThreat
 
 	const float flBodyYaw = SolveBodyYawForHeadTarget(pLocal, flTargetYaw);
 
-	matrix3x4 tempBones[MAXSTUDIOBONES];
-	if (!SetupBonesForYaw(pLocal, flBodyYaw, tempBones))
+	if (!SetupBonesForYaw(pLocal, flBodyYaw, m_aTempBones))
 		return 0;
 
 	const float flHalfX = (vHeadMaxs.x - vHeadMins.x) * 0.5f;
@@ -719,7 +715,7 @@ int CFreestand::MultipointCheckDetailed(CTFPlayer* pLocal, const FreestandThreat
 	for (int c = 0; c < MULTIPOINT_CORNERS; c++)
 	{
 		Vec3 vHeadWorld;
-		Math::VectorTransform(vLocalCorners[c], tempBones[iHeadBone], vHeadWorld);
+		Math::VectorTransform(vLocalCorners[c], m_aTempBones[iHeadBone], vHeadWorld);
 
 		CGameTrace trace = {};
 		SDK::Trace(threat.m_vEyePos, vHeadWorld, MASK_SHOT | CONTENTS_GRATE, &filter, &trace);
@@ -741,7 +737,7 @@ int CFreestand::MultipointCheckDetailed(CTFPlayer* pLocal, const FreestandThreat
 				if (!pHitbox)
 					continue;
 
-				const float flDist = IntersectRayWithBox(threat.m_vEyePos, vHeadWorld, pHitbox->bbmin, pHitbox->bbmax, tempBones[pHitbox->bone]);
+				const float flDist = IntersectRayWithBox(threat.m_vEyePos, vHeadWorld, pHitbox->bbmin, pHitbox->bbmax, m_aTempBones[pHitbox->bone]);
 				if (flDist >= 0.f && flDist < flClosestHit)
 					flClosestHit = flDist;
 			}
@@ -782,8 +778,7 @@ int CFreestand::MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& thre
 
 	const float flBodyYaw = SolveBodyYawForHeadTarget(pLocal, flTargetYaw);
 
-	matrix3x4 tempBones[MAXSTUDIOBONES];
-	if (!SetupBonesForYaw(pLocal, flBodyYaw, tempBones))
+	if (!SetupBonesForYaw(pLocal, flBodyYaw, m_aTempBones))
 		return 0;
 
 	const float flHalfX = (vHeadMaxs.x - vHeadMins.x) * 0.5f;
@@ -809,7 +804,7 @@ int CFreestand::MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& thre
 	for (int c = 0; c < MULTIPOINT_CORNERS; c++)
 	{
 		Vec3 vHeadWorld;
-		Math::VectorTransform(vLocalCorners[c], tempBones[iHeadBone], vHeadWorld);
+		Math::VectorTransform(vLocalCorners[c], m_aTempBones[iHeadBone], vHeadWorld);
 
 		CGameTrace trace = {};
 		SDK::Trace(threat.m_vEyePos, vHeadWorld, MASK_SHOT | CONTENTS_GRATE, &filter, &trace);
@@ -831,7 +826,7 @@ int CFreestand::MultipointCheck(CTFPlayer* pLocal, const FreestandThreat_t& thre
 				if (!pHitbox)
 					continue;
 
-				const float flDist = IntersectRayWithBox(threat.m_vEyePos, vHeadWorld, pHitbox->bbmin, pHitbox->bbmax, tempBones[pHitbox->bone]);
+				const float flDist = IntersectRayWithBox(threat.m_vEyePos, vHeadWorld, pHitbox->bbmin, pHitbox->bbmax, m_aTempBones[pHitbox->bone]);
 				if (flDist >= 0.f && flDist < flClosestHit)
 					flClosestHit = flDist;
 			}
@@ -967,7 +962,6 @@ void CFreestand::SampleThreatsDual(CTFPlayer* pLocal)
 		Vec3(flHalfX,  flHalfY, -flHalfZ)
 	};
 
-	matrix3x4 tempBones[MAXSTUDIOBONES];
 	const int iInitialSegments = Vars::AntiAim::FreestandInitialSegments.Value;
 	const float flSegmentStep = 360.f / static_cast<float>(iInitialSegments);
 	const float flOldPitch = m_flCurrentPitch;
@@ -985,9 +979,9 @@ void CFreestand::SampleThreatsDual(CTFPlayer* pLocal)
 			for (int s = 0; s < iInitialSegments; s++)
 			{
 				const float flSampleYaw = threat.m_flDirToLocal + (flSegmentStep * static_cast<float>(s));
-				const float flBodyYaw = SolveBodyYawForHeadTarget(pLocal, flSampleYaw);
+				const float flBodyYaw = SolveBodyYawForHeadTarget(pLocal, flSampleYaw, false);
 
-				if (!SetupBonesForYaw(pLocal, flBodyYaw, tempBones))
+				if (!SetupBonesForYaw(pLocal, flBodyYaw, m_aTempBones))
 				{
 					threat.m_bSampleHit[s] = false;
 					continue;
@@ -998,7 +992,7 @@ void CFreestand::SampleThreatsDual(CTFPlayer* pLocal)
 				filter.m_iTeam = threat.m_pPlayer->m_iTeamNum();
 
 				Vec3 vHeadCenter;
-				Math::VectorTransform(Vec3(0, 0, 0), tempBones[iBone], vHeadCenter);
+				Math::VectorTransform(Vec3(0, 0, 0), m_aTempBones[iBone], vHeadCenter);
 
 				CGameTrace trace = {};
 				SDK::Trace(threat.m_vEyePos, vHeadCenter, MASK_SHOT | CONTENTS_GRATE, &filter, &trace);
@@ -1020,7 +1014,7 @@ void CFreestand::SampleThreatsDual(CTFPlayer* pLocal)
 						if (!pHitbox)
 							continue;
 
-						const float flDist = IntersectRayWithBox(threat.m_vEyePos, vHeadCenter, pHitbox->bbmin, pHitbox->bbmax, tempBones[pHitbox->bone]);
+						const float flDist = IntersectRayWithBox(threat.m_vEyePos, vHeadCenter, pHitbox->bbmin, pHitbox->bbmax, m_aTempBones[pHitbox->bone]);
 						if (flDist >= 0.f && flDist < flClosestHit)
 							flClosestHit = flDist;
 					}
@@ -1039,7 +1033,7 @@ void CFreestand::SampleThreatsDual(CTFPlayer* pLocal)
 				for (int c = 0; c < MULTIPOINT_CORNERS; c++)
 				{
 					Vec3 vWorld;
-					Math::VectorTransform(vLocalCorners[c], tempBones[iBone], vWorld);
+					Math::VectorTransform(vLocalCorners[c], m_aTempBones[iBone], vWorld);
 
 					SDK::Trace(threat.m_vEyePos, vWorld, MASK_SHOT | CONTENTS_GRATE, &filter, &trace);
 
@@ -1060,7 +1054,7 @@ void CFreestand::SampleThreatsDual(CTFPlayer* pLocal)
 							if (!pHitbox)
 								continue;
 
-							const float flDist = IntersectRayWithBox(threat.m_vEyePos, vWorld, pHitbox->bbmin, pHitbox->bbmax, tempBones[pHitbox->bone]);
+							const float flDist = IntersectRayWithBox(threat.m_vEyePos, vWorld, pHitbox->bbmin, pHitbox->bbmax, m_aTempBones[pHitbox->bone]);
 							if (flDist >= 0.f && flDist < flClosestHit)
 								flClosestHit = flDist;
 						}
@@ -1284,10 +1278,10 @@ void CFreestand::Render()
 	Vec3 vCircleCenter = Vec3(m_vViewPos.x, m_vViewPos.y, m_vHeadCenter.z);
 
 	// Red line: from circle center to actual current head position
-	if (!m_vFinalHeadPos.IsZero())
+	if (!m_vActualHeadPos.IsZero())
 	{
 		G::LineStorage.emplace_back(
-			std::pair<Vec3, Vec3>(vCircleCenter, m_vFinalHeadPos),
+			std::pair<Vec3, Vec3>(vCircleCenter, m_vActualHeadPos),
 			flExpiry, Color_t(255, 0, 0, 255), false
 		);
 	}

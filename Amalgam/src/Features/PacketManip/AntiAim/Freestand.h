@@ -34,6 +34,7 @@ private:
 	Vec3 m_vHeadCenter = {};
 
 	matrix3x4 m_aBones[MAXSTUDIOBONES] = {};
+	matrix3x4 m_aTempBones[MAXSTUDIOBONES] = {};  // Temporary bones to avoid stack overflow
 	bool m_bBonesSetup = false;
 	int m_iHeadBone = 0;
 	float m_flViewYaw = 0.f;
@@ -57,6 +58,7 @@ private:
 	
 	float m_flFinalAppliedBodyYaw = 0.f;
 	Vec3 m_vFinalHeadPos = {};
+	Vec3 m_vActualHeadPos = {};  // Store actual current head position for visualization
 
 	bool SetupBonesForYaw(CTFPlayer* pLocal, float flBodyYaw, matrix3x4* pBonesOut);
 	Vec3 GetHeadCenterFromBones(const matrix3x4* pBones) const;

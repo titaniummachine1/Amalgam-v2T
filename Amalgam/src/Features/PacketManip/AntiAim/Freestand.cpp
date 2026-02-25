@@ -119,11 +119,36 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 	m_flCurrentBodyYaw = pLocal->m_angEyeAnglesY();
 	m_flViewYaw = m_flCurrentBodyYaw;
 
+	Vec3 vCircleCenter = Vec3(m_vOrigin.x, m_vOrigin.y, vHeadCenter.z);
+	
 	const float flActualHeadYaw = RAD2DEG(atan2f(
-		vHeadCenter.y - m_vViewPos.y,
-		vHeadCenter.x - m_vViewPos.x
+		vHeadCenter.y - vCircleCenter.y,
+		vHeadCenter.x - vCircleCenter.x
 	));
 	m_flHeadYawOffset = Math::NormalizeAngle(flActualHeadYaw - m_flViewYaw);
+	
+	matrix3x4 iterBones[MAXSTUDIOBONES];
+	for (int i = 0; i < 5; i++)
+	{
+		const float flTestBodyYaw = m_flViewYaw + m_flHeadYawOffset;
+		if (!SetupBonesForYaw(pLocal, flTestBodyYaw, iterBones))
+			break;
+		
+		Vec3 vTestHeadCenter = pLocal->As<CBaseAnimating>()->GetHitboxCenter(iterBones, HEAD_HITBOX);
+		if (vTestHeadCenter.IsZero())
+			break;
+		
+		const float flMeasuredHeadYaw = RAD2DEG(atan2f(
+			vTestHeadCenter.y - vCircleCenter.y,
+			vTestHeadCenter.x - vCircleCenter.x
+		));
+		const float flNewOffset = Math::NormalizeAngle(flMeasuredHeadYaw - m_flViewYaw);
+		
+		if (fabsf(flNewOffset - m_flHeadYawOffset) < 0.1f)
+			break;
+		
+		m_flHeadYawOffset = flNewOffset;
+	}
 }
 
 bool CFreestand::SetupBonesForYaw(CTFPlayer* pLocal, float flBodyYaw, matrix3x4* pBonesOut)
@@ -1224,9 +1249,9 @@ void CFreestand::Render()
 		flExpiry, Color_t(255, 0, 255, 255), false
 	);
 
-	// Red line: from view position to actual head center (shows where head actually is)
+	// Red line: from circle center to actual head center (shows where head actually is)
 	G::LineStorage.emplace_back(
-		std::pair<Vec3, Vec3>(m_vViewPos, m_vHeadCenter),
+		std::pair<Vec3, Vec3>(vCircleCenter, m_vHeadCenter),
 		flExpiry, Color_t(255, 0, 0, 255), false
 	);
 }

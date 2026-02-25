@@ -28,6 +28,7 @@ private:
 	float m_flCurrentBodyYaw = 0.f;
 	float m_flCurrentPitch = -89.f;
 	float m_flBestPitch = -89.f;
+	float m_flHeadYawOffset = 0.f;
 	Vec3 m_vOrigin = {};
 	Vec3 m_vViewPos = {};
 	Vec3 m_vHeadCenter = {};

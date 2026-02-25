@@ -97,6 +97,12 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 
 	m_flCurrentBodyYaw = pLocal->m_angEyeAnglesY();
 	m_flViewYaw = m_flCurrentBodyYaw;
+	
+	const float flActualHeadYaw = RAD2DEG(atan2f(
+		vHeadCenter.y - m_vViewPos.y,
+		vHeadCenter.x - m_vViewPos.x
+	));
+	m_flHeadYawOffset = Math::NormalizeAngle(flActualHeadYaw - m_flViewYaw);
 }
 
 bool CFreestand::SetupBonesForYaw(CTFPlayer* pLocal, float flBodyYaw, matrix3x4* pBonesOut)
@@ -221,24 +227,7 @@ Vec3 CFreestand::HeadPosForYaw(float flYaw) const
 
 float CFreestand::SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHeadYaw)
 {
-	if (!pLocal)
-		return flTargetHeadYaw;
-
-	matrix3x4 tempBones[MAXSTUDIOBONES];
-	if (!SetupBonesForYaw(pLocal, flTargetHeadYaw, tempBones))
-		return flTargetHeadYaw;
-
-	const Vec3 vActualHeadCenter = GetHeadCenterFromBones(tempBones);
-	if (vActualHeadCenter.IsZero())
-		return flTargetHeadYaw;
-
-	const float flActualHeadYaw = RAD2DEG(atan2f(
-		vActualHeadCenter.y - m_vViewPos.y,
-		vActualHeadCenter.x - m_vViewPos.x
-	));
-
-	const float flOffset = Math::NormalizeAngle(flActualHeadYaw - flTargetHeadYaw);
-	return Math::NormalizeAngle(flTargetHeadYaw - flOffset);
+	return Math::NormalizeAngle(flTargetHeadYaw - m_flHeadYawOffset);
 }
 
 float CFreestand::GetSecurePitch(CTFPlayer* pLocal)

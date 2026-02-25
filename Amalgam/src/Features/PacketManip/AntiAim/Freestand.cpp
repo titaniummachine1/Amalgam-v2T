@@ -158,35 +158,14 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 	m_flCurrentBodyYaw = pLocal->m_angEyeAnglesY();
 	m_flViewYaw = m_flCurrentBodyYaw;
 
+	// Recompute head yaw offset every tick based on current bones
+	// This accounts for animation changes and ensures deterministic yaw calculations
 	Vec3 vCircleCenter = Vec3(m_vViewPos.x, m_vViewPos.y, vHeadCenter.z);
-
 	const float flActualHeadYaw = RAD2DEG(atan2f(
 		vHeadCenter.y - vCircleCenter.y,
 		vHeadCenter.x - vCircleCenter.x
 	));
 	m_flHeadYawOffset = Math::NormalizeAngle(flActualHeadYaw - m_flViewYaw);
-
-	for (int i = 0; i < 5; i++)
-	{
-		const float flTestBodyYaw = m_flViewYaw + m_flHeadYawOffset;
-		if (!SetupBonesForYaw(pLocal, flTestBodyYaw, m_aTempBones))
-			break;
-
-		Vec3 vTestHeadCenter = pLocal->As<CBaseAnimating>()->GetHitboxCenter(m_aTempBones, HEAD_HITBOX);
-		if (vTestHeadCenter.IsZero())
-			break;
-
-		const float flMeasuredHeadYaw = RAD2DEG(atan2f(
-			vTestHeadCenter.y - vCircleCenter.y,
-			vTestHeadCenter.x - vCircleCenter.x
-		));
-		const float flNewOffset = Math::NormalizeAngle(flMeasuredHeadYaw - m_flViewYaw);
-
-		if (fabsf(flNewOffset - m_flHeadYawOffset) < 0.1f)
-			break;
-
-		m_flHeadYawOffset = flNewOffset;
-	}
 }
 
 bool CFreestand::SetupBonesForYaw(CTFPlayer* pLocal, float flBodyYaw, matrix3x4* pBonesOut)
@@ -579,10 +558,18 @@ void CFreestand::AccumulateThreatSample(float flYaw, float flThreatValue, int iR
 	const int iSize = std::min(iResolution, MAX_HEATMAP_RESOLUTION);
 	const float flStep = 360.f / static_cast<float>(iSize);
 
+	// Normalize yaw to [-180, 180] range for consistent indexing
+	float flNormalizedYaw = Math::NormalizeAngle(flYaw);
+
+	// Calculate which heatmap index this yaw falls into
+	// flIndex = (flNormalizedYaw + 180) / flStep, where 0 = -180deg, iSize-1 = +180deg
+	const float flIndex = (flNormalizedYaw + 180.f) / flStep;
+
+	// Distribute threat value to nearby indices using linear interpolation
 	for (int i = 0; i < iSize; i++)
 	{
 		const float flSegmentYaw = -180.f + flStep * static_cast<float>(i);
-		const float flDiff = Math::NormalizeAngle(flYaw - flSegmentYaw);
+		const float flDiff = Math::NormalizeAngle(flNormalizedYaw - flSegmentYaw);
 		const float flDist = fabsf(flDiff);
 		const float flNorm = flDist / 180.f;
 		const float flInterpolatedThreat = flThreatValue * (1.f - flNorm);
@@ -600,9 +587,13 @@ float CFreestand::GetNormalizedSafety(float flYaw, int iResolution) const
 
 	const int iSize = std::min(iResolution, MAX_HEATMAP_RESOLUTION);
 	const float flStep = 360.f / static_cast<float>(iSize);
-	// FIX: Segment yaw ranges from -180 to +180, so index calculation must match
-	// flYaw = -180 corresponds to index 0, flYaw = +180 corresponds to index iSize-1
-	const float flIndex = (flYaw + 180.f) / flStep;
+
+	// Normalize yaw to [-180, 180] range for consistent indexing
+	float flNormalizedYaw = Math::NormalizeAngle(flYaw);
+
+	// Calculate index in heatmap array
+	// Index 0 = -180°, iSize-1 = +180°
+	const float flIndex = (flNormalizedYaw + 180.f) / flStep;
 	const int iIndex0 = static_cast<int>(floorf(flIndex)) % iSize;
 	const int iIndex1 = (iIndex0 + 1) % iSize;
 	const float flFrac = flIndex - floorf(flIndex);
@@ -620,10 +611,13 @@ void CFreestand::AccumulateThreatSampleDual(float flYaw, float flThreatValue, in
 	const float flStep = 360.f / static_cast<float>(iSize);
 	float* pHeatmap = bUpPitch ? m_aHeatmapThreatUp : m_aHeatmapThreatDown;
 
+	// Normalize yaw to [-180, 180] range for consistent indexing
+	float flNormalizedYaw = Math::NormalizeAngle(flYaw);
+
 	for (int i = 0; i < iSize; i++)
 	{
 		const float flSegmentYaw = -180.f + flStep * static_cast<float>(i);
-		const float flDiff = Math::NormalizeAngle(flYaw - flSegmentYaw);
+		const float flDiff = Math::NormalizeAngle(flNormalizedYaw - flSegmentYaw);
 		const float flDist = fabsf(flDiff);
 		const float flNorm = flDist / 180.f;
 		const float flInterpolatedThreat = flThreatValue * (1.f - flNorm);
@@ -646,8 +640,13 @@ float CFreestand::GetNormalizedSafetyDual(float flYaw, int iResolution, bool bUp
 	const float* pHeatmap = bUpPitch ? m_aHeatmapThreatUp : m_aHeatmapThreatDown;
 	const int iSize = std::min(iResolution, MAX_HEATMAP_RESOLUTION);
 	const float flStep = 360.f / static_cast<float>(iSize);
-	// FIX: Match AccumulateThreatSampleDual's -180 to +180 segment layout
-	const float flIndex = (flYaw + 180.f) / flStep;
+
+	// Normalize yaw to [-180, 180] range for consistent indexing
+	float flNormalizedYaw = Math::NormalizeAngle(flYaw);
+
+	// Calculate index in heatmap array
+	// Index 0 = -180°, iSize-1 = +180°
+	const float flIndex = (flNormalizedYaw + 180.f) / flStep;
 	const int iIndex0 = static_cast<int>(floorf(flIndex)) % iSize;
 	const int iIndex1 = (iIndex0 + 1) % iSize;
 	const float flFrac = flIndex - floorf(flIndex);
@@ -693,6 +692,8 @@ void CFreestand::BuildHeatmapVisualization(int iVisualSegments, float flDataDegr
 
 	for (int i = 0; i < iVisualSegments; i++)
 	{
+		// Generate visualization points using world yaw directly
+		// Index 0 should be -180°, last index should be +180°
 		const float flYaw = -180.f + flStep * static_cast<float>(i);
 
 		HeatmapPoint_t point;
@@ -741,13 +742,14 @@ int CFreestand::CountHeadHitsAtYawDetailed(CTFPlayer* pLocal, const FreestandThr
 		Vec3(flHalfX,  flHalfY, -flHalfZ)
 	};
 
-	int iHits = 0;
 	int iWorldBlocks = 0;
 	int iBodyBlocks = 0;
 	CTraceFilterHitscan filter;
 	filter.m_pSkip = pLocal;
 	filter.m_iTeam = threat.m_pPlayer->m_iTeamNum();
 
+	// Check each corner to see if yaw is exposed
+	// Return immediately if we find an exposed corner, don't check all 8 if not necesary
 	for (int c = 0; c < MULTIPOINT_CORNERS; c++)
 	{
 		Vec3 vHeadWorld;
@@ -787,12 +789,18 @@ int CFreestand::CountHeadHitsAtYawDetailed(CTFPlayer* pLocal, const FreestandThr
 		else if (bBlockedByBody)
 			iBodyBlocks++;
 		else
-			iHits++;
+		{
+			// Found an exposed corner - yaw is unsafe, set flags and return immediately
+			bOutWorldBlocked = false;
+			bOutBodyBlocked = false;
+			return 1;
+		}
 	}
 
+	// All corners are blocked (either by world or body)
 	bOutWorldBlocked = (iWorldBlocks == MULTIPOINT_CORNERS);
 	bOutBodyBlocked = (iBodyBlocks == MULTIPOINT_CORNERS);
-	return iHits;
+	return 0;
 }
 
 int CFreestand::CountHeadHitsAtYaw(CTFPlayer* pLocal, const FreestandThreat_t& threat, float flTargetYaw)
@@ -832,11 +840,12 @@ int CFreestand::CountHeadHitsAtYaw(CTFPlayer* pLocal, const FreestandThreat_t& t
 		Vec3(flHalfX,  flHalfY, -flHalfZ)
 	};
 
-	int iHits = 0;
 	CTraceFilterHitscan filter;
 	filter.m_pSkip = pLocal;
 	filter.m_iTeam = threat.m_pPlayer->m_iTeamNum();
 
+	// For freestand: we only care if ANY corner can be hit (not how many)
+	// Return 1 if yaw is exposed, 0 if completely blocked
 	for (int c = 0; c < MULTIPOINT_CORNERS; c++)
 	{
 		Vec3 vHeadWorld;
@@ -871,11 +880,12 @@ int CFreestand::CountHeadHitsAtYaw(CTFPlayer* pLocal, const FreestandThreat_t& t
 				bBlockedByBody = true;
 		}
 
+		// If ANY corner is exposed to this threat, yaw is unsafe
 		if (!bHitWorld && !bBlockedByBody)
-			iHits++;
+			return 1; // Yaw is exposed (BAIL IMMEDIATELY)
 	}
 
-	return iHits;
+	return 0; // All corners blocked or hit world (yaw is safe from this threat)
 }
 
 void CFreestand::RefineHeatmap(CTFPlayer* pLocal)

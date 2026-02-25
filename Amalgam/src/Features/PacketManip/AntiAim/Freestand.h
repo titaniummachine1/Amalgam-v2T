@@ -54,6 +54,9 @@ private:
 	float m_flMostDangerousYaw = 0.f;
 	bool m_bHasSafeYaw = false;
 	bool m_bSafestIsBodyBlocked = false;
+	
+	float m_flFinalAppliedBodyYaw = 0.f;
+	Vec3 m_vFinalHeadPos = {};
 
 	bool SetupBonesForYaw(CTFPlayer* pLocal, float flBodyYaw, matrix3x4* pBonesOut);
 	Vec3 GetHeadCenterFromBones(const matrix3x4* pBones) const;

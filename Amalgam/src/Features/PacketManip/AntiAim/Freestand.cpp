@@ -120,33 +120,33 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 	m_flViewYaw = m_flCurrentBodyYaw;
 
 	Vec3 vCircleCenter = Vec3(m_vOrigin.x, m_vOrigin.y, vHeadCenter.z);
-	
+
 	const float flActualHeadYaw = RAD2DEG(atan2f(
 		vHeadCenter.y - vCircleCenter.y,
 		vHeadCenter.x - vCircleCenter.x
 	));
 	m_flHeadYawOffset = Math::NormalizeAngle(flActualHeadYaw - m_flViewYaw);
-	
+
 	matrix3x4 iterBones[MAXSTUDIOBONES];
 	for (int i = 0; i < 5; i++)
 	{
 		const float flTestBodyYaw = m_flViewYaw + m_flHeadYawOffset;
 		if (!SetupBonesForYaw(pLocal, flTestBodyYaw, iterBones))
 			break;
-		
+
 		Vec3 vTestHeadCenter = pLocal->As<CBaseAnimating>()->GetHitboxCenter(iterBones, HEAD_HITBOX);
 		if (vTestHeadCenter.IsZero())
 			break;
-		
+
 		const float flMeasuredHeadYaw = RAD2DEG(atan2f(
 			vTestHeadCenter.y - vCircleCenter.y,
 			vTestHeadCenter.x - vCircleCenter.x
 		));
 		const float flNewOffset = Math::NormalizeAngle(flMeasuredHeadYaw - m_flViewYaw);
-		
+
 		if (fabsf(flNewOffset - m_flHeadYawOffset) < 0.1f)
 			break;
-		
+
 		m_flHeadYawOffset = flNewOffset;
 	}
 }
@@ -273,7 +273,21 @@ Vec3 CFreestand::HeadPosForYaw(float flYaw) const
 
 float CFreestand::SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHeadYaw)
 {
-	return Math::NormalizeAngle(flTargetHeadYaw - m_flHeadYawOffset);
+	const float flBodyYaw = Math::NormalizeAngle(flTargetHeadYaw - m_flHeadYawOffset);
+	
+	m_flFinalAppliedBodyYaw = flBodyYaw;
+	
+	matrix3x4 finalBones[MAXSTUDIOBONES];
+	if (SetupBonesForYaw(pLocal, flBodyYaw, finalBones))
+	{
+		m_vFinalHeadPos = pLocal->As<CBaseAnimating>()->GetHitboxCenter(finalBones, HEAD_HITBOX);
+	}
+	else
+	{
+		m_vFinalHeadPos = m_vHeadCenter;
+	}
+	
+	return flBodyYaw;
 }
 
 float CFreestand::GetSecurePitch(CTFPlayer* pLocal)
@@ -1227,7 +1241,27 @@ void CFreestand::Render()
 
 	Vec3 vCircleCenter = Vec3(m_vOrigin.x, m_vOrigin.y, m_vHeadCenter.z);
 
-	// Green/Orange line: safest yaw (only if safe spot exists after all work done)
+	// Red line: from circle center to actual current head position
+	if (!m_vFinalHeadPos.IsZero())
+	{
+		G::LineStorage.emplace_back(
+			std::pair<Vec3, Vec3>(vCircleCenter, m_vFinalHeadPos),
+			flExpiry, Color_t(255, 0, 0, 255), false
+		);
+	}
+
+	// Purple line: final applied body yaw (where algorithm is currently aiming to hide head)
+	if (m_flFinalAppliedBodyYaw != 0.f)
+	{
+		const float flPurpleYaw = m_flFinalAppliedBodyYaw + m_flHeadYawOffset;
+		Vec3 vAppliedYawWorld = HeadPosForYaw(flPurpleYaw);
+		G::LineStorage.emplace_back(
+			std::pair<Vec3, Vec3>(vCircleCenter, vAppliedYawWorld),
+			flExpiry, Color_t(255, 0, 255, 255), false
+		);
+	}
+
+	// Green/Orange line: safest yaw found (where head should be for maximum safety)
 	if (!m_vThreats.empty() && m_bHasSafeYaw)
 	{
 		Vec3 vBestWorld = HeadPosForYaw(m_flSafestYaw);
@@ -1241,17 +1275,4 @@ void CFreestand::Render()
 			flExpiry, tLineColor, false
 		);
 	}
-
-	// Purple line: final algorithm-chosen yaw (where we want to aim to hide head)
-	Vec3 vViewYawWorld = HeadPosForYaw(m_flViewYaw);
-	G::LineStorage.emplace_back(
-		std::pair<Vec3, Vec3>(vCircleCenter, vViewYawWorld),
-		flExpiry, Color_t(255, 0, 255, 255), false
-	);
-
-	// Red line: from circle center to actual head center (shows where head actually is)
-	G::LineStorage.emplace_back(
-		std::pair<Vec3, Vec3>(vCircleCenter, m_vHeadCenter),
-		flExpiry, Color_t(255, 0, 0, 255), false
-	);
 }

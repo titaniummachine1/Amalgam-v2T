@@ -109,9 +109,48 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 		m_iHeadBone = pBox ? pBox->bone : 0;
 	}
 
-	Vec3 vHorizontalDelta = vHeadCenter - m_vViewPos;
-	vHorizontalDelta.z = 0.f;
-	m_flHeadRadius = vHorizontalDelta.Length();
+	// Calculate radius at both pitch up and down to get maximum reach
+	float flRadiusAtCurrentPitch = 0.f;
+	{
+		Vec3 vHorizontalDelta = vHeadCenter - m_vViewPos;
+		vHorizontalDelta.z = 0.f;
+		flRadiusAtCurrentPitch = vHorizontalDelta.Length();
+	}
+
+	// Test pitch up (-89)
+	matrix3x4 tempBonesUp[MAXSTUDIOBONES];
+	float flOldPitch = m_flCurrentPitch;
+	m_flCurrentPitch = -89.f;
+	float flRadiusUp = flRadiusAtCurrentPitch;
+	if (SetupBonesForYaw(pLocal, m_flCurrentBodyYaw, tempBonesUp))
+	{
+		Vec3 vHeadUp = pLocal->As<CBaseAnimating>()->GetHitboxCenter(tempBonesUp, HEAD_HITBOX);
+		if (!vHeadUp.IsZero())
+		{
+			Vec3 vDeltaUp = vHeadUp - m_vViewPos;
+			vDeltaUp.z = 0.f;
+			flRadiusUp = vDeltaUp.Length();
+		}
+	}
+
+	// Test pitch down (89)
+	matrix3x4 tempBonesDown[MAXSTUDIOBONES];
+	m_flCurrentPitch = 89.f;
+	float flRadiusDown = flRadiusAtCurrentPitch;
+	if (SetupBonesForYaw(pLocal, m_flCurrentBodyYaw, tempBonesDown))
+	{
+		Vec3 vHeadDown = pLocal->As<CBaseAnimating>()->GetHitboxCenter(tempBonesDown, HEAD_HITBOX);
+		if (!vHeadDown.IsZero())
+		{
+			Vec3 vDeltaDown = vHeadDown - m_vViewPos;
+			vDeltaDown.z = 0.f;
+			flRadiusDown = vDeltaDown.Length();
+		}
+	}
+	m_flCurrentPitch = flOldPitch;
+
+	// Use maximum radius to ensure circle encompasses all possible head positions
+	m_flHeadRadius = std::max({flRadiusAtCurrentPitch, flRadiusUp, flRadiusDown});
 
 	if (m_flHeadRadius < 10.f)
 		m_flHeadRadius = 10.f;

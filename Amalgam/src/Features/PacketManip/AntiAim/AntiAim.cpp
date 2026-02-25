@@ -204,7 +204,13 @@ float CAntiAim::GetYaw(CTFPlayer* pLocal, CUserCmd* pCmd, bool bFake)
 {
 	float flYaw = GetBaseYaw(pLocal, pCmd, bFake) + GetYawOffset(pLocal, bFake);
 
-	if (Vars::AntiAim::FreestandEnabled.Value && F::Freestand.HasSafeYaw() && !bFake)
+	if (Vars::AntiAim::FreestandDebugPointAtTarget.Value && !bFake)
+	{
+		// Debug mode: point head directly at target to test head yaw calculation
+		const float flTargetYaw = GetBaseYaw(pLocal, pCmd, false);
+		flYaw = F::Freestand.SolveBodyYawForHeadTarget(pLocal, flTargetYaw);
+	}
+	else if (Vars::AntiAim::FreestandEnabled.Value && F::Freestand.HasSafeYaw() && !bFake)
 	{
 		const float flSafeYaw = F::Freestand.GetSafestYaw();
 		flYaw = F::Freestand.SolveBodyYawForHeadTarget(pLocal, flSafeYaw);

@@ -551,6 +551,7 @@ namespace Vars
 		CVar(FreestandDegreesPerSegment, "Freestand degrees per segment", 0.5f, SLIDER_PRECISION, 0.1f, 2.0f, 0.05f);
 		CVar(FreestandVisuals, "Freestand visuals", false, VISUAL);
 		CVar(FreestandSegments, "Freestand segments", 64, SLIDER_CLAMP, 8, 360);
+		CVar(FreestandDebugPointAtTarget, "Debug: Point head at target", false);
 	NAMESPACE_END(AntiAim);
 
 	NAMESPACE_BEGIN(Resolver)

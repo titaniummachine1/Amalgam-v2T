@@ -29,6 +29,8 @@ private:
 	float m_flCurrentPitch = -89.f;
 	float m_flSafestPitch = -89.f;
 	float m_flHeadYawOffset = 0.f;
+	float m_flHeadYawOffsetUp = 0.f;
+	float m_flHeadYawOffsetDown = 0.f;
 	Vec3 m_vOrigin = {};
 	Vec3 m_vViewPos = {};
 	Vec3 m_vHeadCenter = {};
@@ -50,6 +52,15 @@ private:
 	int m_iTotalShotsAddedDown = 0;
 
 	std::vector<HeatmapPoint_t> m_vHeatmap = {};
+	std::vector<HeatmapPoint_t> m_vHeatmapUp = {};
+	std::vector<HeatmapPoint_t> m_vHeatmapDown = {};
+	bool m_bDualHeatmapMode = false;
+
+	// Per-pitch head position data for dual circle visualization
+	float m_flHeadRadiusUp = 0.f;
+	float m_flHeadRadiusDown = 0.f;
+	float m_flHeadCenterUpZ = 0.f;
+	float m_flHeadCenterDownZ = 0.f;
 
 	float m_flSafestYaw = 0.f;
 	float m_flMostDangerousYaw = 0.f;
@@ -82,11 +93,15 @@ private:
 	float FindSafestYaw() const;
 	float FindSafestYawAndPitch(bool& bOutUpPitch) const;
 	float FindMostDangerousYaw() const;
+	Vec3 GetHeadPosForYawDual(float flYaw, bool bUp) const;
+	void BuildDualHeatmapVisualization(int iVisualSegments, float flDataDegreesPerSegment);
 
 public:
 	void Run(CTFPlayer* pLocal, CUserCmd* pCmd, float flPitch);
 	bool HasSafeYaw() const { return m_bHasSafeYaw; }
 	float GetSafestYaw() const { return m_flSafestYaw; }
+	float GetSafestPitch() const { return m_flSafestPitch; }
+	bool IsDualHeatmapMode() const { return m_bDualHeatmapMode; }
 	float GetMostDangerousYaw() const { return m_flMostDangerousYaw; }
 	float SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHeadYaw, bool bStoreForVisualization = true);
 	float GetMaxBodyOffsetPitch(CTFPlayer* pLocal);
@@ -95,6 +110,8 @@ public:
 	void Render();
 
 	const std::vector<HeatmapPoint_t>& GetHeatmap() const { return m_vHeatmap; }
+	const std::vector<HeatmapPoint_t>& GetHeatmapUp() const { return m_vHeatmapUp; }
+	const std::vector<HeatmapPoint_t>& GetHeatmapDown() const { return m_vHeatmapDown; }
 	const std::vector<FreestandThreat_t>& GetThreats() const { return m_vThreats; }
 	Vec3 GetViewPos() const { return m_vViewPos; }
 	Vec3 GetHeadCenter() const { return m_vHeadCenter; }

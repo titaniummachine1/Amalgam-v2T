@@ -35,14 +35,25 @@ void CFreestand::Reset()
 	m_flHeadHeightOffset = 0.f;
 	m_vThreats.clear();
 	m_vHeatmap.clear();
+	m_vHeatmapUp.clear();
+	m_vHeatmapDown.clear();
+	m_bDualHeatmapMode = false;
+	m_flHeadRadiusUp = 0.f;
+	m_flHeadRadiusDown = 0.f;
+	m_flHeadCenterUpZ = 0.f;
+	m_flHeadCenterDownZ = 0.f;
 	m_flSafestYaw = 0.f;
 	m_flMostDangerousYaw = 0.f;
 	m_bHasSafeYaw = false;
 	m_bSafestIsBodyBlocked = false;
-	m_vActualHeadPos = Vec3();  // Reset actual head position
+	m_vActualHeadPos = Vec3();
 
 	memset(m_aHeatmapThreat, 0, sizeof(m_aHeatmapThreat));
+	memset(m_aHeatmapThreatUp, 0, sizeof(m_aHeatmapThreatUp));
+	memset(m_aHeatmapThreatDown, 0, sizeof(m_aHeatmapThreatDown));
 	m_iTotalShotsAdded = 0;
+	m_iTotalShotsAddedUp = 0;
+	m_iTotalShotsAddedDown = 0;
 }
 
 void CFreestand::GatherThreats(CTFPlayer* pLocal)
@@ -111,7 +122,11 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 		m_iHeadBone = pBox ? pBox->bone : 0;
 	}
 
-	// Calculate radius at both pitch up and down to get maximum reach
+	// Get current view yaw (what the player is looking at)
+	m_flViewYaw = pLocal->m_angEyeAnglesY();
+	m_flCurrentBodyYaw = m_flViewYaw;
+
+	// Calculate radius and offsets at both pitch up and down
 	float flRadiusAtCurrentPitch = 0.f;
 	{
 		Vec3 vHorizontalDelta = vHeadCenter - m_vViewPos;
@@ -119,25 +134,66 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 		flRadiusAtCurrentPitch = vHorizontalDelta.Length();
 	}
 
-	// Test pitch up (-89)
 	float flOldPitch = m_flCurrentPitch;
+
+	// === PITCH UP (-89) ===
 	m_flCurrentPitch = -89.f;
 	float flRadiusUp = flRadiusAtCurrentPitch;
-	if (SetupBonesForYaw(pLocal, m_flCurrentBodyYaw, m_aTempBones))
+	float flHeadCenterUpZ = vHeadCenter.z;
+	
+	// Setup bones with view yaw aligned to body yaw (0 offset) to get baseline head position
+	if (SetupBonesForYaw(pLocal, m_flViewYaw, m_aTempBones))
 	{
 		Vec3 vHeadUp = pLocal->As<CBaseAnimating>()->GetHitboxCenter(m_aTempBones, HEAD_HITBOX);
 		if (!vHeadUp.IsZero())
 		{
+			// Calculate horizontal radius
 			Vec3 vDeltaUp = vHeadUp - m_vViewPos;
 			vDeltaUp.z = 0.f;
 			flRadiusUp = vDeltaUp.Length();
+			flHeadCenterUpZ = vHeadUp.z;
+
+			// Calculate head yaw offset relative to view yaw
+			Vec3 vCircleCenter = Vec3(m_vViewPos.x, m_vViewPos.y, flHeadCenterUpZ);
+			float flHeadYaw = RAD2DEG(atan2f(vHeadUp.y - vCircleCenter.y, vHeadUp.x - vCircleCenter.x));
+			m_flHeadYawOffsetUp = Math::NormalizeAngle(flHeadYaw - m_flViewYaw);
+
+			// Verify offset by trying to place head at a target yaw
+			const int iVerifyAttempts = 5;
+			for (int i = 0; i < iVerifyAttempts; i++)
+			{
+				float flTargetHeadYaw = m_flViewYaw + 45.f; // Test with 45 degree offset
+				float flBodyYaw = Math::NormalizeAngle(flTargetHeadYaw - m_flHeadYawOffsetUp);
+				
+				if (SetupBonesForYaw(pLocal, flBodyYaw, m_aTempBones))
+				{
+					Vec3 vTestHead = pLocal->As<CBaseAnimating>()->GetHitboxCenter(m_aTempBones, HEAD_HITBOX);
+					if (!vTestHead.IsZero())
+					{
+						float flResultHeadYaw = RAD2DEG(atan2f(vTestHead.y - vCircleCenter.y, vTestHead.x - vCircleCenter.x));
+						float flError = Math::NormalizeAngle(flResultHeadYaw - flTargetHeadYaw);
+						
+						// If error is significant, adjust offset
+						if (fabsf(flError) > 0.5f)
+						{
+							m_flHeadYawOffsetUp = Math::NormalizeAngle(m_flHeadYawOffsetUp + flError);
+						}
+						else
+						{
+							break; // Offset is correct
+						}
+					}
+				}
+			}
 		}
 	}
 
-	// Test pitch down (89)
+	// === PITCH DOWN (89) ===
 	m_flCurrentPitch = 89.f;
 	float flRadiusDown = flRadiusAtCurrentPitch;
-	if (SetupBonesForYaw(pLocal, m_flCurrentBodyYaw, m_aTempBones))
+	float flHeadCenterDownZ = vHeadCenter.z;
+	
+	if (SetupBonesForYaw(pLocal, m_flViewYaw, m_aTempBones))
 	{
 		Vec3 vHeadDown = pLocal->As<CBaseAnimating>()->GetHitboxCenter(m_aTempBones, HEAD_HITBOX);
 		if (!vHeadDown.IsZero())
@@ -145,9 +201,49 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 			Vec3 vDeltaDown = vHeadDown - m_vViewPos;
 			vDeltaDown.z = 0.f;
 			flRadiusDown = vDeltaDown.Length();
+			flHeadCenterDownZ = vHeadDown.z;
+
+			// Calculate head yaw offset relative to view yaw
+			Vec3 vCircleCenter = Vec3(m_vViewPos.x, m_vViewPos.y, flHeadCenterDownZ);
+			float flHeadYaw = RAD2DEG(atan2f(vHeadDown.y - vCircleCenter.y, vHeadDown.x - vCircleCenter.x));
+			m_flHeadYawOffsetDown = Math::NormalizeAngle(flHeadYaw - m_flViewYaw);
+
+			// Verify offset
+			const int iVerifyAttempts = 5;
+			for (int i = 0; i < iVerifyAttempts; i++)
+			{
+				float flTargetHeadYaw = m_flViewYaw - 45.f; // Test with -45 degree offset
+				float flBodyYaw = Math::NormalizeAngle(flTargetHeadYaw - m_flHeadYawOffsetDown);
+				
+				if (SetupBonesForYaw(pLocal, flBodyYaw, m_aTempBones))
+				{
+					Vec3 vTestHead = pLocal->As<CBaseAnimating>()->GetHitboxCenter(m_aTempBones, HEAD_HITBOX);
+					if (!vTestHead.IsZero())
+					{
+						float flResultHeadYaw = RAD2DEG(atan2f(vTestHead.y - vCircleCenter.y, vTestHead.x - vCircleCenter.x));
+						float flError = Math::NormalizeAngle(flResultHeadYaw - flTargetHeadYaw);
+						
+						if (fabsf(flError) > 0.5f)
+						{
+							m_flHeadYawOffsetDown = Math::NormalizeAngle(m_flHeadYawOffsetDown + flError);
+						}
+						else
+						{
+							break;
+						}
+					}
+				}
+			}
 		}
 	}
+	
 	m_flCurrentPitch = flOldPitch;
+
+	// Store per-pitch data for dual circle visualization
+	m_flHeadRadiusUp = (flRadiusUp < 10.f) ? 10.f : flRadiusUp;
+	m_flHeadRadiusDown = (flRadiusDown < 10.f) ? 10.f : flRadiusDown;
+	m_flHeadCenterUpZ = flHeadCenterUpZ;
+	m_flHeadCenterDownZ = flHeadCenterDownZ;
 
 	// Use maximum radius to ensure circle encompasses all possible head positions
 	m_flHeadRadius = std::max({ flRadiusAtCurrentPitch, flRadiusUp, flRadiusDown });
@@ -155,17 +251,8 @@ void CFreestand::ComputeHeadCircle(CTFPlayer* pLocal)
 	if (m_flHeadRadius < 10.f)
 		m_flHeadRadius = 10.f;
 
-	m_flCurrentBodyYaw = pLocal->m_angEyeAnglesY();
-	m_flViewYaw = m_flCurrentBodyYaw;
-
-	// Recompute head yaw offset every tick based on current bones
-	// This accounts for animation changes and ensures deterministic yaw calculations
-	Vec3 vCircleCenter = Vec3(m_vViewPos.x, m_vViewPos.y, vHeadCenter.z);
-	const float flActualHeadYaw = RAD2DEG(atan2f(
-		vHeadCenter.y - vCircleCenter.y,
-		vHeadCenter.x - vCircleCenter.x
-	));
-	m_flHeadYawOffset = Math::NormalizeAngle(flActualHeadYaw - m_flViewYaw);
+	// Use current pitch offset as default
+	m_flHeadYawOffset = (m_flCurrentPitch < 0.f) ? m_flHeadYawOffsetUp : m_flHeadYawOffsetDown;
 }
 
 bool CFreestand::SetupBonesForYaw(CTFPlayer* pLocal, float flBodyYaw, matrix3x4* pBonesOut)
@@ -218,30 +305,30 @@ bool CFreestand::CanPlayerHeadshot(CTFPlayer* pPlayer) const
 	// First: Check if this CLASS can headshot
 	if (iClass == TF_CLASS_SNIPER)
 	{
-		// Sniper CAN headshot - check if holding PRIMARY weapon
+		// Sniper CAN headshot with primary weapon (all sniper rifles)
 		auto pWeapon = pPlayer->m_hActiveWeapon();
 		if (!pWeapon)
 			return false;
 
 		auto pPrimary = pPlayer->GetWeaponFromSlot(SLOT_PRIMARY);
-		return pWeapon == pPrimary;
+		// If slot lookup fails, assume any held weapon may be the primary
+		return !pPrimary || pWeapon == pPrimary;
 	}
 
 	if (iClass == TF_CLASS_SPY)
 	{
-		// Spy CAN headshot - check if holding SECONDARY weapon (Ambassador)
+		// Spy CAN headshot with Ambassador and similar revolvers (PRIMARY slot in TF2)
 		auto pWeapon = pPlayer->m_hActiveWeapon();
 		if (!pWeapon)
 			return false;
 
-		auto pSecondary = pPlayer->GetWeaponFromSlot(SLOT_SECONDARY);
-		return pWeapon == pSecondary;
+		auto pPrimary = pPlayer->GetWeaponFromSlot(SLOT_PRIMARY);
+		return pPrimary && pWeapon == pPrimary;
 	}
 
 	// All other classes cannot headshot
 	return false;
 }
-
 
 float CFreestand::IntersectRayWithBox(const Vec3& vStart, const Vec3& vEnd, const Vec3& vMins, const Vec3& vMaxs, const matrix3x4& transform)
 {
@@ -323,9 +410,52 @@ Vec3 CFreestand::GetHeadPosForYaw(float flYaw) const
 	return vCenter + Vec3(cosf(flRad) * m_flHeadRadius, sinf(flRad) * m_flHeadRadius, 0.f);
 }
 
+Vec3 CFreestand::GetHeadPosForYawDual(float flYaw, bool bUp) const
+{
+	float flRad = DEG2RAD(flYaw);
+	float flRadius = bUp ? m_flHeadRadiusUp : m_flHeadRadiusDown;
+	float flZ = bUp ? m_flHeadCenterUpZ : m_flHeadCenterDownZ;
+	Vec3 vCenter = Vec3(m_vViewPos.x, m_vViewPos.y, flZ);
+	return vCenter + Vec3(cosf(flRad) * flRadius, sinf(flRad) * flRadius, 0.f);
+}
+
+void CFreestand::BuildDualHeatmapVisualization(int iVisualSegments, float flDataDegreesPerSegment)
+{
+	m_vHeatmapUp.clear();
+	m_vHeatmapDown.clear();
+	m_vHeatmapUp.reserve(iVisualSegments);
+	m_vHeatmapDown.reserve(iVisualSegments);
+
+	const int iDataResolution = static_cast<int>(360.f / flDataDegreesPerSegment);
+	const float flStep = 360.f / static_cast<float>(iVisualSegments);
+
+	for (int i = 0; i < iVisualSegments; i++)
+	{
+		const float flYaw = -180.f + flStep * static_cast<float>(i);
+
+		HeatmapPoint_t pointUp;
+		pointUp.m_flYawAngle = flYaw;
+		pointUp.m_vHeadPos = GetHeadPosForYawDual(flYaw, true);
+		pointUp.m_flSafety = GetNormalizedSafetyDual(flYaw, iDataResolution, true);
+		pointUp.m_iHitsOut8 = -1;
+		pointUp.m_bVerified = false;
+		m_vHeatmapUp.push_back(pointUp);
+
+		HeatmapPoint_t pointDown;
+		pointDown.m_flYawAngle = flYaw;
+		pointDown.m_vHeadPos = GetHeadPosForYawDual(flYaw, false);
+		pointDown.m_flSafety = GetNormalizedSafetyDual(flYaw, iDataResolution, false);
+		pointDown.m_iHitsOut8 = -1;
+		pointDown.m_bVerified = false;
+		m_vHeatmapDown.push_back(pointDown);
+	}
+}
+
 float CFreestand::SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHeadYaw, bool bStoreForVisualization)
 {
-	const float flBodyYaw = Math::NormalizeAngle(flTargetHeadYaw - m_flHeadYawOffset);
+	// Use the appropriate offset based on current pitch
+	float flOffset = (m_flCurrentPitch < 0.f) ? m_flHeadYawOffsetUp : m_flHeadYawOffsetDown;
+	const float flBodyYaw = Math::NormalizeAngle(flTargetHeadYaw - flOffset);
 
 	if (bStoreForVisualization)
 	{
@@ -1191,6 +1321,7 @@ void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd, float flPitch)
 
 	if (Vars::AntiAim::FreestandPitchOverride.Value && !m_vThreats.empty())
 	{
+		// Dual heatmap mode: test both pitch up and down
 		const int iResolution = static_cast<int>(360.f / flDegreesPerSegment);
 		ClearHeatmap(iResolution);
 
@@ -1219,50 +1350,22 @@ void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd, float flPitch)
 				break;
 			}
 
-			AccumulateThreatSampleDual(m_flSafestYaw, 1.f, iResolution, bUpPitch);
+			AccumulateThreatSampleDual(m_flSafestYaw, static_cast<float>(iTotalHits), iResolution, bUpPitch);
 		}
 
+		m_bDualHeatmapMode = true;
 		m_bHasSafeYaw = bFoundSafe;
 		m_flMostDangerousYaw = 0.f;
-		BuildHeatmapVisualization(iVisualSegments, flDegreesPerSegment);
-	}
-	else
-	{
-		if (!m_vThreats.empty())
-			SampleThreats(pLocal);
+		BuildDualHeatmapVisualization(iVisualSegments, flDegreesPerSegment);
 
-		BuildHeatmap(flDegreesPerSegment);
-
-		m_flSafestYaw = FindSafestYaw();
-		m_flMostDangerousYaw = FindMostDangerousYaw();
-
-		BuildHeatmapVisualization(iVisualSegments, flDegreesPerSegment);
-
-		if (!m_vThreats.empty())
-		{
-			RefineHeatmap(pLocal);
-			m_flSafestYaw = FindSafestYaw();
-			m_flMostDangerousYaw = FindMostDangerousYaw();
-		}
-	}
-
-	m_bHasSafeYaw = false;
-
-	if (!m_vThreats.empty() && m_iTotalShotsAdded > 0)
-	{
-		for (const auto& point : m_vHeatmap)
-		{
-			if (point.m_bVerified && point.m_iHitsOut8 == 0)
-			{
-				m_bHasSafeYaw = true;
-				break;
-			}
-		}
-
+		// Compute body-blocked status for dual mode
 		if (m_bHasSafeYaw)
 		{
 			int iWorldBlockedCount = 0;
 			int iBodyBlockedCount = 0;
+
+			const float flOldPitch = m_flCurrentPitch;
+			m_flCurrentPitch = m_flSafestPitch;
 
 			for (const auto& threat : m_vThreats)
 			{
@@ -1279,7 +1382,86 @@ void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd, float flPitch)
 				}
 			}
 
+			m_flCurrentPitch = flOldPitch;
 			m_bSafestIsBodyBlocked = (iBodyBlockedCount > 0 && iWorldBlockedCount == 0);
+		}
+	}
+	else
+	{
+		// Single heatmap mode: use current pitch
+		// Determine which heatmap to use based on current pitch
+		bool bUseDualMode = false;
+		bool bUseUpPitch = (m_flCurrentPitch < -45.f); // Up if pitch is significantly negative
+		bool bUseDownPitch = (m_flCurrentPitch > 45.f); // Down if pitch is significantly positive
+
+		if (!bUseUpPitch && !bUseDownPitch)
+		{
+			// Dynamic: current pitch is neutral, use standard single heatmap
+			bUseDualMode = false;
+		}
+		else
+		{
+			// Use the appropriate single heatmap (up or down)
+			bUseDualMode = false;
+		}
+
+		if (!m_vThreats.empty())
+			SampleThreats(pLocal);
+
+		BuildHeatmap(flDegreesPerSegment);
+
+		m_flSafestYaw = FindSafestYaw();
+		m_flMostDangerousYaw = FindMostDangerousYaw();
+
+		BuildHeatmapVisualization(iVisualSegments, flDegreesPerSegment);
+
+		if (!m_vThreats.empty())
+		{
+			RefineHeatmap(pLocal);
+			m_flSafestYaw = FindSafestYaw();
+			m_flMostDangerousYaw = FindMostDangerousYaw();
+		}
+
+		m_bDualHeatmapMode = false;
+	}
+
+	if (!m_bDualHeatmapMode)
+	{
+		m_bHasSafeYaw = false;
+
+		if (!m_vThreats.empty() && m_iTotalShotsAdded > 0)
+		{
+			for (const auto& point : m_vHeatmap)
+			{
+				if (point.m_bVerified && point.m_iHitsOut8 == 0)
+				{
+					m_bHasSafeYaw = true;
+					break;
+				}
+			}
+
+			if (m_bHasSafeYaw)
+			{
+				int iWorldBlockedCount = 0;
+				int iBodyBlockedCount = 0;
+
+				for (const auto& threat : m_vThreats)
+				{
+					bool bWorldBlocked = false;
+					bool bBodyBlocked = false;
+					const int iHits = CountHeadHitsAtYawDetailed(pLocal, threat, m_flSafestYaw, bWorldBlocked, bBodyBlocked);
+
+					if (iHits == 0)
+					{
+						if (bWorldBlocked)
+							iWorldBlockedCount++;
+						else if (bBodyBlocked)
+							iBodyBlockedCount++;
+					}
+				}
+
+				m_bSafestIsBodyBlocked = (iBodyBlockedCount > 0 && iWorldBlockedCount == 0);
+			}
 		}
 	}
 }
@@ -1289,7 +1471,15 @@ void CFreestand::Render()
 	if (!Vars::AntiAim::FreestandVisuals.Value)
 		return;
 
-	if (m_vHeatmap.empty() || m_vThreats.empty())
+	if (m_vThreats.empty())
+		return;
+
+	if (m_bDualHeatmapMode)
+	{
+		if (m_vHeatmapUp.empty() && m_vHeatmapDown.empty())
+			return;
+	}
+	else if (m_vHeatmap.empty())
 		return;
 
 	auto pLocal = H::Entities.GetLocal();
@@ -1297,53 +1487,87 @@ void CFreestand::Render()
 		return;
 
 	const float flExpiry = I::GlobalVars->curtime + 0.015f;
-	const int iSize = static_cast<int>(m_vHeatmap.size());
-
-	for (int i = 0; i < iSize; i++)
-	{
-		int j = (i + 1) % iSize;
-
-		float flSafety = std::clamp(m_vHeatmap[i].m_flSafety, 0.f, 1.f);
-
-		Color_t tColor;
-		if (m_vThreats.empty())
-			tColor = { 128, 128, 128, 200 };
-		else
-		{
-			byte r = static_cast<byte>((1.f - flSafety) * 255.f);
-			byte g = static_cast<byte>(flSafety * 255.f);
-			tColor = { r, g, 0, 220 };
-		}
-
-		G::LineStorage.emplace_back(
-			std::pair<Vec3, Vec3>(m_vHeatmap[i].m_vHeadPos, m_vHeatmap[j].m_vHeadPos),
-			flExpiry, tColor, false
-		);
-	}
-
 	Vec3 vCircleCenter = Vec3(m_vViewPos.x, m_vViewPos.y, m_vHeadCenter.z);
 
-	// Red line: from circle center to actual current head position
-	if (!m_vActualHeadPos.IsZero())
+	if (m_bDualHeatmapMode)
 	{
-		G::LineStorage.emplace_back(
-			std::pair<Vec3, Vec3>(vCircleCenter, m_vActualHeadPos),
-			flExpiry, Color_t(255, 0, 0, 255), false
-		);
-	}
+		// Draw up-pitch circle (cyan tones: safe=cyan, unsafe=dark blue)
+		const int iSizeUp = static_cast<int>(m_vHeatmapUp.size());
+		for (int i = 0; i < iSizeUp; i++)
+		{
+			int j = (i + 1) % iSizeUp;
+			float flSafety = std::clamp(m_vHeatmapUp[i].m_flSafety, 0.f, 1.f);
+			byte r = 0;
+			byte g = static_cast<byte>(flSafety * 220.f);
+			byte b = static_cast<byte>(100.f + flSafety * 155.f);
+			G::LineStorage.emplace_back(
+				std::pair<Vec3, Vec3>(m_vHeatmapUp[i].m_vHeadPos, m_vHeatmapUp[j].m_vHeadPos),
+				flExpiry, Color_t(r, g, b, 220), false
+			);
+		}
 
-	// Green/Orange line: safest yaw found (where head should be for maximum safety)
-	if (!m_vThreats.empty() && m_bHasSafeYaw)
+		// Draw down-pitch circle (magenta tones: safe=magenta, unsafe=dark purple)
+		const int iSizeDown = static_cast<int>(m_vHeatmapDown.size());
+		for (int i = 0; i < iSizeDown; i++)
+		{
+			int j = (i + 1) % iSizeDown;
+			float flSafety = std::clamp(m_vHeatmapDown[i].m_flSafety, 0.f, 1.f);
+			byte r = static_cast<byte>(100.f + flSafety * 155.f);
+			byte g = 0;
+			byte b = static_cast<byte>(flSafety * 220.f);
+			G::LineStorage.emplace_back(
+				std::pair<Vec3, Vec3>(m_vHeatmapDown[i].m_vHeadPos, m_vHeatmapDown[j].m_vHeadPos),
+				flExpiry, Color_t(r, g, b, 220), false
+			);
+		}
+
+		// Indicator line to the chosen safest yaw (same color convention as single mode)
+		if (m_bHasSafeYaw)
+		{
+			const bool bChosenIsUp = (m_flSafestPitch < 0.f);
+			Vec3 vChosenCenter = Vec3(m_vViewPos.x, m_vViewPos.y, bChosenIsUp ? m_flHeadCenterUpZ : m_flHeadCenterDownZ);
+			Vec3 vBestWorld = GetHeadPosForYawDual(m_flSafestYaw, bChosenIsUp);
+			Color_t tLineColor = m_bSafestIsBodyBlocked ? Color_t(255, 165, 0, 255) : Color_t(0, 255, 0, 255);
+			G::LineStorage.emplace_back(
+				std::pair<Vec3, Vec3>(vChosenCenter, vBestWorld),
+				flExpiry, tLineColor, false
+			);
+		}
+	}
+	else
 	{
-		Vec3 vBestWorld = GetHeadPosForYaw(m_flSafestYaw);
-		Color_t tLineColor;
-		if (m_bSafestIsBodyBlocked)
-			tLineColor = Color_t(255, 165, 0, 255); // Orange: body-blocked
-		else
-			tLineColor = Color_t(0, 255, 0, 255); // Green: world-blocked
-		G::LineStorage.emplace_back(
-			std::pair<Vec3, Vec3>(vCircleCenter, vBestWorld),
-			flExpiry, tLineColor, false
-		);
+		const int iSize = static_cast<int>(m_vHeatmap.size());
+		for (int i = 0; i < iSize; i++)
+		{
+			int j = (i + 1) % iSize;
+			float flSafety = std::clamp(m_vHeatmap[i].m_flSafety, 0.f, 1.f);
+
+			byte r = static_cast<byte>((1.f - flSafety) * 255.f);
+			byte g = static_cast<byte>(flSafety * 255.f);
+			G::LineStorage.emplace_back(
+				std::pair<Vec3, Vec3>(m_vHeatmap[i].m_vHeadPos, m_vHeatmap[j].m_vHeadPos),
+				flExpiry, Color_t(r, g, 0, 220), false
+			);
+		}
+
+		// Red line: from circle center to actual current head position
+		if (!m_vActualHeadPos.IsZero())
+		{
+			G::LineStorage.emplace_back(
+				std::pair<Vec3, Vec3>(vCircleCenter, m_vActualHeadPos),
+				flExpiry, Color_t(255, 0, 0, 255), false
+			);
+		}
+
+		// Green/Orange line: safest yaw found
+		if (m_bHasSafeYaw)
+		{
+			Vec3 vBestWorld = GetHeadPosForYaw(m_flSafestYaw);
+			Color_t tLineColor = m_bSafestIsBodyBlocked ? Color_t(255, 165, 0, 255) : Color_t(0, 255, 0, 255);
+			G::LineStorage.emplace_back(
+				std::pair<Vec3, Vec3>(vCircleCenter, vBestWorld),
+				flExpiry, tLineColor, false
+			);
+		}
 	}
 }

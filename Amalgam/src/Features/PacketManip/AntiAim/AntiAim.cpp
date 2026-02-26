@@ -341,6 +341,10 @@ void CAntiAim::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 	if (bNeedsFreestand)
 		F::Freestand.Run(pLocal, pCmd, flRealPitch);
 
+	// When pitch override is on and freestand found a safe yaw, apply the optimal pitch
+	if (Vars::AntiAim::FreestandPitchOverride.Value && F::Freestand.HasSafeYaw())
+		flRealPitch = F::Freestand.GetSafestPitch();
+
 	Vec2& vAngles = G::SendPacket ? vFakeAngles : vRealAngles;
 	vAngles.x = flRealPitch;
 	vAngles.y = !iAntiBackstab ? GetYaw(pLocal, pCmd, G::SendPacket) : pCmd->viewangles.y;

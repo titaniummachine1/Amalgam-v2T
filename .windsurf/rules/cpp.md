@@ -1,74 +1,70 @@
 ---
 trigger: always_on
 ---
+# Google C++ Style Guide Rules for Windsurf
+# Reference: https://google.github.io/styleguide/cppguide.html
 
----
-description: 
-globs: 
-alwaysApply: true
----
-**Project Philosophy:**
-This project values simplicity, readability, and consistency above strict adherence to traditional software engineering principles. If a tradeoff must be made, always choose the approach that makes the code easier to read, understand, and maintain—even if it means minor code duplication, more use of globals, or less modularity.
+rules:
+  - name: cpp_formatting_basics
+    description: Fundamental formatting requirements for Google C++ Style
+    patterns: ["**/*.cpp", "**/*.cc", "**/*.h", "**/*.hpp"]
+    instructions: |
+      - Use 2 spaces for indentation. Never use tabs.
+      - Limit line length to 80 characters.
+      - Ensure every .cc file has an associated .h file (unless it's a main() or unit test).
+      - Use UTF-8 encoding for all files.
+      - No trailing whitespace at the end of lines.
 
-1. **Simplicity First:** Prefer simple solutions over complex ones whenever possible. When in doubt, favor code that is simple, readable, and consistent—even if it means minor violations of DRY, modularity, or other best practices.
+  - name: cpp_naming_conventions
+    description: Naming rules for variables, functions, and types
+    patterns: ["**/*.cpp", "**/*.cc", "**/*.h", "**/*.hpp"]
+    instructions: |
+      - File names: All lowercase, underscores preferred (e.g., `my_useful_class.cc`).
+      - Type names (Classes, Structs, Enums, Typedefs): MixedCase starting with upper (e.g., `MyExcitingClass`).
+      - Variable names: All lowercase with underscores (e.g., `local_variable`, `my_class_member_`).
+      - Class data members: Must end with a trailing underscore (e.g., `name_`).
+      - Constant names: Start with a 'k' followed by MixedCase (e.g., `kDaysInAWeek`).
+      - Function names: MixedCase starting with upper (e.g., `MyFunction()`).
+      - Enumerator names: Named like Constants (e.g., `kEnumName`).
 
-2. **DRY Principle:** Avoid duplicating code. Reuse or adapt existing code before writing new functionality. *If following DRY or modularity would require complex data passing, indirection, or abstraction, prefer a small amount of code duplication or a more direct approach for the sake of clarity and maintainability.*
+  - name: cpp_header_guards
+    description: Format for header guards
+    patterns: ["**/*.h", "**/*.hpp"]
+    instructions: |
+      - All headers must use #define guards.
+      - Format: <PROJECT>_<PATH>_<FILE>_H_
+      - Example for `foo/src/bar/baz.h`:
+        #ifndef FOO_BAR_BAZ_H_
+        #define FOO_BAR_BAZ_H_
+        ...
+        #endif // FOO_BAR_BAZ_H_
 
-3. **Consistency:** Prefer a consistent style and structure across the codebase, even if it means not always using the "best" or most advanced pattern for a given situation.
+  - name: cpp_language_restrictions
+    description: Best practices for C++ features
+    patterns: ["**/*.cpp", "**/*.cc", "**/*.h", "**/*.hpp"]
+    instructions: |
+      - Target C++20 features; avoid C++23 or non-standard extensions.
+      - Avoid using forward declarations; #include the header instead.
+      - Use `std::unique_ptr` and `std::shared_ptr` for ownership management.
+      - Do not use `using namespace std;`.
+      - Use `nullptr` instead of `NULL` or `0`.
+      - Prefer `sizeof(variable_name)` over `sizeof(type)`.
 
-4. **Targeted Changes:** Only make changes directly requested or necessary for the request. Avoid speculative changes.
+  - name: cpp_class_structure
+    description: Rules for class declarations
+    patterns: ["**/*.h", "**/*.hpp"]
+    instructions: |
+      - Use the order: public:, then protected:, then private:.
+      - Indent access modifiers (public, private) by 1 space.
+      - Do not leave a blank line after the access modifier keyword.
+      - Use `explicit` for constructors that can be called with a single argument.
+      - Avoid complex logic in constructors; use an `Init()` method if necessary.
 
-5. **Fix, Then Replace:** Prioritize fixing issues within the existing implementation. If a new approach is needed, remove the old implementation.
-
-6. **Clean & Focused Code:** Strive to keep the codebase clean, well-organized, readable, and modular. Avoid letting individual files grow too large (aim for < 500 lines); refactor large files into smaller, focused modules.
-
-7. **No Production Mocking:** Use mocked/fake data only for testing, never in production code.
-
-8. **Functional Style:** Prefer functional programming patterns. Clearly define function inputs/outputs.
-
-9. **Module Imports & Dependencies:** Place all `require` statements at the top of modules. Below imports, add reverse import comments (e.g., `--[[ Imported by: ModuleA ]]`).
-
-10. **Use Custom `G` Module for Shared Data:** *Actively use* the custom `G` (globals) module to store frequently accessed, shared runtime data (e.g., `G.DataBase`, `G.PlayerData`). This simplifies access across modules and avoids polluting the built-in Lua global table (`_G`). **Do not** store application state directly in `_G`. Add comments in `globals.lua` indicating which modules use each variable in `G`.
-
-11. **Frequent Commits:** Make small, frequent commits with descriptive messages.
-
-12. **Avoid Anonymous Functions:** Use named functions instead of anonymous ones (`function() ... end`). Named functions improve readability, stack traces, and profiling. Only use anonymous functions if there is a *very* compelling reason and it demonstrably improves clarity in that specific context.
-
-13. **Self-Contained Initialization:** Modules managing state/resources (e.g., `Database`, `Config`, `Fetcher`) should handle their own initialization internally (ideally once, either on first `require` or via an `Initialize()` function). Avoid complex setup logic in `Main.lua`.
-
-14. **Avoid `collectgarbage`:** Do not use `collectgarbage()` unless specifically requested. If requested, question the necessity and discuss alternatives first.
-
-15. **Controlled Global Returns:** Avoid returning modules globally from `Main.lua` *unless* they are intended for direct user interaction (e.g., triggering a `Fetcher.Start()` from a menu). For accessing shared *data*, use the `G` module (Rule 10). For accessing another module's *functions*, use `require` directly.
-
-16. **Low Coupling:** Design modules to be as independent as possible, primarily interacting through shared data in `G` or explicit function calls via `require`.
-
-17. **Avoid Over-Engineering:** Do not introduce abstractions, patterns, or indirection unless they provide clear, immediate value for readability or maintainability.
-
-18. **Documentation for Simplicity:** If a simple or "less correct" approach is chosen for clarity, add a brief comment explaining why, so future maintainers understand the reasoning.
-
-19. **Library Requires:** If requiring a library that may not exist (e.g., optional or external dependencies), always use `pcall(require, ...)` and handle errors gracefully. If the file is inside the workspace and should always be present, use a direct `require` without `pcall`.
-
-20. **Code Organization:** Follow this standard order in module files:
-    1. **Imports** (`require` statements)
-    2. **Module Declaration** (`local ModuleName = {}`)
-    3. **Local Variables/Utilities** (constants, helper variables)
-    4. **Helper/Private Functions** (internal utility functions)
-    5. **Public Module Functions** (functions exposed in the module's interface)
-    6. **Self-Initialization** (if the module self-initializes)
-    7. **Callback Registration** (any event handlers or callbacks)
-    8. **Module Return** (`return ModuleName`)
-
-21. Consult Lmaobox Documentation: Before using any function specific to the Lmaobox API (e.g., from client, engine, entities, draw, callbacks, etc.), consult the lmaobox_lua_documentation.md file to verify its usage, parameters, return values, and potential side effects. Do not rely solely on assumptions or examples.
-lmaobox_lua_documentation.md its in root of workspace
-
-22. **Correct Bitwise Flag Checking:** When checking player state flags using raw integers (like `m_fFlags`), **use the bitwise AND operator (`&`) combined with the documented global flag constant**. The correct check is `(flags & FLAG_CONSTANT) ~= 0`. **Do NOT** compare the result to `1` (e.g., `flags & FLAG_CONSTANT == 1`), as this is often incorrect. Ensure the `FLAG_CONSTANT` (e.g., `FL_ONGROUND`, `FL_DUCKING`) is the correct, documented global constant for the flag you are checking (Refer to Rule #21). Using dedicated API functions (e.g., `player:IsOnGround()`) is an acceptable alternative, especially if the flag constant is not readily documented or the function enhances clarity.
-
----
-**Lua Specific Notes:**
-*   **Vector Normalization:** Normalize `Vec` using `Vec / Vec:Length()`.
-*   **`atan` Function:** Use `math.atan(y, x)` instead of the deprecated `atan2`.
-*   **Function Order:** Define functions *before* they are called in the script.
-
-dont use bit.band if you ever encoutner it it is isue as its never used and not allowed in my api
-
-for flags
+  - name: cpp_comment_style
+    description: Requirements for documentation and implementation comments
+    patterns: ["**/*.cpp", "**/*.cc", "**/*.h", "**/*.hpp"]
+    instructions: |
+      - Use `//` for all comments (Google style prefers this over `/* */`).
+      - Put 2 spaces between code and a trailing comment.
+      - Every file should have a boilerplate/copyright comment at the top.
+      - Use `TODO(username): description` for temporary code.

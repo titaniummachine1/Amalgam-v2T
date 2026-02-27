@@ -1,0 +1,35 @@
+[1mdiff --git a/Amalgam/Amalgam.vcxproj b/Amalgam/Amalgam.vcxproj[m
+[1mindex 1ee3e67..234e186 100644[m
+[1m--- a/Amalgam/Amalgam.vcxproj[m
+[1m+++ b/Amalgam/Amalgam.vcxproj[m
+[36m@@ -1161,6 +1161,11 @@[m
+     <ClCompile Include="src\Features\NoSpread\NoSpreadProjectile\NoSpreadProjectile.cpp" />[m
+     <ClCompile Include="src\Features\PacketManip\AntiAim\AntiAim.cpp" />[m
+     <ClCompile Include="src\Features\PacketManip\AntiAim\Freestand.cpp" />[m
+[32m+[m[32m    <ClCompile Include="src\Features\PacketManip\AntiAim\HeatmapBuilder\HeatmapBuilder.cpp" />[m
+[32m+[m[32m    <ClCompile Include="src\Features\PacketManip\AntiAim\ThreatSampler\ThreatSampler.cpp" />[m
+[32m+[m[32m    <ClCompile Include="src\Utils\HeadYawCalculator\HeadYawCalculator.cpp" />[m
+[32m+[m[32m    <ClCompile Include="src\Utils\PoseManipulation\PoseManipulation.cpp" />[m
+[32m+[m[32m    <ClCompile Include="src\Features\Visuals\FakeAngle\FreestandVisuals.cpp" />[m
+     <ClCompile Include="src\Features\PacketManip\FakeLag\FakeLag.cpp" />[m
+     <ClCompile Include="src\Features\PacketManip\PacketManip.cpp" />[m
+     <ClCompile Include="src\Features\Players\PlayerCore.cpp" />[m
+[36m@@ -1507,6 +1512,11 @@[m
+     <ClInclude Include="src\Features\NoSpread\NoSpreadProjectile\NoSpreadProjectile.h" />[m
+     <ClInclude Include="src\Features\PacketManip\AntiAim\AntiAim.h" />[m
+     <ClInclude Include="src\Features\PacketManip\AntiAim\Freestand.h" />[m
+[32m+[m[32m    <ClInclude Include="src\Features\PacketManip\AntiAim\HeatmapBuilder\HeatmapBuilder.h" />[m
+[32m+[m[32m    <ClInclude Include="src\Features\PacketManip\AntiAim\ThreatSampler\ThreatSampler.h" />[m
+[32m+[m[32m    <ClInclude Include="src\Utils\HeadYawCalculator\HeadYawCalculator.h" />[m
+[32m+[m[32m    <ClInclude Include="src\Utils\PoseManipulation\PoseManipulation.h" />[m
+[32m+[m[32m    <ClInclude Include="src\Features\Visuals\FakeAngle\FreestandVisuals.h" />[m
+     <ClInclude Include="src\Features\PacketManip\FakeLag\FakeLag.h" />[m
+     <ClInclude Include="src\Features\PacketManip\PacketManip.h" />[m
+     <ClInclude Include="src\Features\Resolver\Resolver.h" />[m
+[36m@@ -1775,4 +1785,4 @@[m
+     </PropertyGroup>[m
+     <Error Condition="!Exists('..\packages\boost.1.87.0\build\boost.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\boost.1.87.0\build\boost.targets'))" />[m
+   </Target>[m
+[31m-</Project>[m
+\ No newline at end of file[m
+[32m+[m[32m</Project>[m

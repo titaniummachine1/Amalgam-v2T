@@ -9,6 +9,7 @@
 #include "../../../../Utils/PoseManipulation/PoseManipulation.h"
 #include "../../../../Utils/HeadYawCalculator/HeadYawCalculator.h"
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <string.h>
 
@@ -76,6 +77,23 @@ namespace HeatmapBuilder
 		return 1.f - std::clamp(flInterpolatedThreat, 0.f, 1.f);
 	}
 
+	float GetRawThreat(float flYaw, int iResolution, const float* pHeatmap)
+	{
+		const int iSize = std::min(iResolution, MAX_HEATMAP_RESOLUTION);
+		const float flStep = 360.f / static_cast<float>(iSize);
+
+		const float flNormalizedYaw = Math::NormalizeAngle(flYaw);
+		const float flIndex = (flNormalizedYaw + 180.f) / flStep;
+		const int iIndex0 = static_cast<int>(floorf(flIndex)) % iSize;
+		const int iIndex1 = (iIndex0 + 1) % iSize;
+		const float flFrac = flIndex - floorf(flIndex);
+
+		const float flThreat0 = pHeatmap[iIndex0];
+		const float flThreat1 = pHeatmap[iIndex1];
+
+		return flThreat0 * (1.f - flFrac) + flThreat1 * flFrac;
+	}
+
 	void BuildHeatmap(const std::vector<FreestandThreat_t>& threats, float flDegreesPerSegment, float* pHeatmap, int& iTotalShots)
 	{
 		const int iResolution = static_cast<int>(360.f / flDegreesPerSegment);
@@ -86,16 +104,13 @@ namespace HeatmapBuilder
 
 		const int iInitialSegments = Vars::AntiAim::FreestandInitialSegments.Value;
 
-		if (!threats.empty())
+		const auto& primaryThreat = threats[0];
+		for (int s = 0; s < iInitialSegments && s < static_cast<int>(primaryThreat.m_bSampleHitUp.size()); s++)
 		{
-			const auto& primaryThreat = threats[0];
-			for (int s = 0; s < iInitialSegments && s < static_cast<int>(primaryThreat.m_bSampleHitUp.size()); s++)
+			if (primaryThreat.m_bSampleHitUp[s])
 			{
-				if (primaryThreat.m_bSampleHitUp[s])
-				{
-					const float flActualYaw = primaryThreat.m_vActualSampleYawUp[s];
-					AccumulateThreatSample(flActualYaw, 1.f, iResolution, pHeatmap, iTotalShots);
-				}
+				const float flActualYaw = primaryThreat.m_vActualSampleYawUp[s];
+				AccumulateThreatSample(flActualYaw, 1.f, iResolution, pHeatmap, iTotalShots);
 			}
 		}
 	}
@@ -202,20 +217,21 @@ namespace HeatmapBuilder
 
 	float FindSafestYaw(float flDegreesPerSegment, const float* pHeatmap, int iTotalShots)
 	{
+		(void)iTotalShots;
 		const int iResolution = static_cast<int>(360.f / flDegreesPerSegment);
 		const float flStep = 360.f / static_cast<float>(iResolution);
 
-		float flBestSafety = -1.f;
+		float flLowestThreat = FLT_MAX;
 		float flBestYaw = 0.f;
 
 		for (int i = 0; i < iResolution; i++)
 		{
 			const float flYaw = -180.f + flStep * static_cast<float>(i);
-			const float flSafety = GetNormalizedSafety(flYaw, iResolution, pHeatmap, iTotalShots);
+			const float flThreat = GetRawThreat(flYaw, iResolution, pHeatmap);
 
-			if (flSafety > flBestSafety)
+			if (flThreat < flLowestThreat)
 			{
-				flBestSafety = flSafety;
+				flLowestThreat = flThreat;
 				flBestYaw = flYaw;
 			}
 		}
@@ -226,28 +242,30 @@ namespace HeatmapBuilder
 	float FindSafestYawAndPitch(float flDegreesPerSegment, const float* pHeatmapUp, const float* pHeatmapDown,
 		int iTotalShotsUp, int iTotalShotsDown, bool& bOutUpPitch)
 	{
+		(void)iTotalShotsUp;
+		(void)iTotalShotsDown;
 		const int iResolution = static_cast<int>(360.f / flDegreesPerSegment);
 		const float flStep = 360.f / static_cast<float>(iResolution);
 		float flBestYaw = 0.f;
-		float flBestSafety = -1.f;
+		float flLowestThreat = FLT_MAX;
 		bool bBestIsUp = true;
 
 		for (int i = 0; i < iResolution; i++)
 		{
 			const float flYaw = -180.f + flStep * static_cast<float>(i);
 
-			const float flSafetyUp = GetNormalizedSafety(flYaw, iResolution, pHeatmapUp, iTotalShotsUp);
-			if (flSafetyUp > flBestSafety)
+			const float flThreatUp = GetRawThreat(flYaw, iResolution, pHeatmapUp);
+			if (flThreatUp < flLowestThreat)
 			{
-				flBestSafety = flSafetyUp;
+				flLowestThreat = flThreatUp;
 				flBestYaw = flYaw;
 				bBestIsUp = true;
 			}
 
-			const float flSafetyDown = GetNormalizedSafety(flYaw, iResolution, pHeatmapDown, iTotalShotsDown);
-			if (flSafetyDown > flBestSafety)
+			const float flThreatDown = GetRawThreat(flYaw, iResolution, pHeatmapDown);
+			if (flThreatDown < flLowestThreat)
 			{
-				flBestSafety = flSafetyDown;
+				flLowestThreat = flThreatDown;
 				flBestYaw = flYaw;
 				bBestIsUp = false;
 			}
@@ -255,28 +273,5 @@ namespace HeatmapBuilder
 
 		bOutUpPitch = bBestIsUp;
 		return flBestYaw;
-	}
-
-	float FindMostDangerousYaw(float flDegreesPerSegment, const float* pHeatmap, int iTotalShots)
-	{
-		const int iResolution = static_cast<int>(360.f / flDegreesPerSegment);
-		const float flStep = 360.f / static_cast<float>(iResolution);
-
-		float flWorstSafety = 2.f;
-		float flWorstYaw = 0.f;
-
-		for (int i = 0; i < iResolution; i++)
-		{
-			const float flYaw = -180.f + flStep * static_cast<float>(i);
-			const float flSafety = GetNormalizedSafety(flYaw, iResolution, pHeatmap, iTotalShots);
-
-			if (flSafety < flWorstSafety)
-			{
-				flWorstSafety = flSafety;
-				flWorstYaw = flYaw;
-			}
-		}
-
-		return flWorstYaw;
 	}
 }

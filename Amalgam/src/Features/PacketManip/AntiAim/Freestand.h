@@ -31,7 +31,6 @@ private:
 	bool m_bDualHeatmapMode = false;
 
 	float m_flSafestYaw = 0.f;
-	float m_flMostDangerousYaw = 0.f;
 	bool m_bHasSafeYaw = false;
 	bool m_bSafestIsBodyBlocked = false;
 	Vec3 m_vSafestHeadPos = {};
@@ -42,7 +41,6 @@ public:
 	float GetSafestYaw() const { return m_flSafestYaw; }
 	float GetSafestPitch() const { return m_flSafestPitch; }
 	bool IsDualHeatmapMode() const { return m_bDualHeatmapMode; }
-	float GetMostDangerousYaw() const { return m_flMostDangerousYaw; }
 	float SolveBodyYawForHeadTarget(CTFPlayer* pLocal, float flTargetHeadYaw, bool bStoreForVisualization = true);
 	float GetMaxBodyOffsetPitch(CTFPlayer* pLocal);
 	void Reset();

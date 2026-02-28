@@ -32,7 +32,6 @@ namespace HeatmapBuilder
 	float FindSafestYaw(float flDegreesPerSegment, const float* pHeatmap, int iTotalShots);
 	float FindSafestYawAndPitch(float flDegreesPerSegment, const float* pHeatmapUp, const float* pHeatmapDown, 
 		int iTotalShotsUp, int iTotalShotsDown, bool& bOutUpPitch);
-	float FindMostDangerousYaw(float flDegreesPerSegment, const float* pHeatmap, int iTotalShots);
 	
 	Vec3 GetHeadPosForYaw(float flYaw, const Vec3& vViewPos, float flHeadRadius, float flHeadCenterZ);
 	void BuildDualHeatmapVisualization(std::vector<HeatmapPoint_t>& outHeatmapUp, std::vector<HeatmapPoint_t>& outHeatmapDown,

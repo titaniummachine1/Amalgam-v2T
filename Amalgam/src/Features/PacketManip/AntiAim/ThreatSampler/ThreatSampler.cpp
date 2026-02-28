@@ -141,7 +141,6 @@ namespace ThreatSampler
 
 		mNewKillerMoves.clear();
 
-		bool bIsPrimaryThreat = true;
 		for (auto pEntity : H::Entities.GetGroup(EntityEnum::PlayerEnemy))
 		{
 			auto pPlayer = pEntity->As<CTFPlayer>();
@@ -161,21 +160,16 @@ namespace ThreatSampler
 			threat.m_pPlayer = pPlayer;
 			threat.m_vEyePos = pPlayer->GetShootPos();
 			threat.m_iHeadshotCount = 0;
+			Vec3 vDelta = pPlayer->m_vecOrigin() - pLocal->m_vecOrigin();
+			vDelta.z = 0.f;
+			const float flLen = vDelta.Length();
+			threat.m_flThreatYaw = (flLen > 1.f) ? RAD2DEG(atan2f(vDelta.y, vDelta.x)) : 0.f;
 
 			const int iEntIndex = pPlayer->entindex();
 			auto it = mKillerMoves.find(iEntIndex);
 			threat.m_iKillerMoveScore = (it != mKillerMoves.end()) ? it->second : 0;
 
 			mNewKillerMoves[iEntIndex] = 0;
-
-			if (bIsPrimaryThreat)
-			{
-				Vec3 vDelta = pPlayer->m_vecOrigin() - pLocal->m_vecOrigin();
-				vDelta.z = 0.f;
-				const float flLen = vDelta.Length();
-				threat.m_flThreatYaw = (flLen > 1.f) ? RAD2DEG(atan2f(vDelta.y, vDelta.x)) : 0.f;
-				bIsPrimaryThreat = false;
-			}
 
 			outThreats.push_back(threat);
 		}
@@ -185,13 +179,6 @@ namespace ThreatSampler
 				return a.m_iKillerMoveScore > b.m_iKillerMoveScore;
 			});
 
-		if (!outThreats.empty())
-		{
-			Vec3 vDelta = outThreats[0].m_pPlayer->m_vecOrigin() - pLocal->m_vecOrigin();
-			vDelta.z = 0.f;
-			const float flLen = vDelta.Length();
-			outThreats[0].m_flThreatYaw = (flLen > 1.f) ? RAD2DEG(atan2f(vDelta.y, vDelta.x)) : 0.f;
-		}
 	}
 
 	void SampleThreats(CTFPlayer* pLocal, std::vector<FreestandThreat_t>& threats,
@@ -210,19 +197,16 @@ namespace ThreatSampler
 		const int iBone = pBox->bone;
 		const Vec3 vMins = pBox->bbmin;
 		const Vec3 vMaxs = pBox->bbmax;
-		const float flHalfX = (vMaxs.x - vMins.x) * 0.5f;
-		const float flHalfY = (vMaxs.y - vMins.y) * 0.5f;
-		const float flHalfZ = (vMaxs.z - vMins.z) * 0.5f;
-
+		const Vec3 vHeadLocalCenter = (vMins + vMaxs) * 0.5f;
 		const Vec3 vLocalCorners[MULTIPOINT_CORNERS] = {
-			Vec3(-flHalfX, -flHalfY,  flHalfZ),
-			Vec3(flHalfX, -flHalfY,  flHalfZ),
-			Vec3(-flHalfX,  flHalfY,  flHalfZ),
-			Vec3(flHalfX,  flHalfY,  flHalfZ),
-			Vec3(-flHalfX, -flHalfY, -flHalfZ),
-			Vec3(flHalfX, -flHalfY, -flHalfZ),
-			Vec3(-flHalfX,  flHalfY, -flHalfZ),
-			Vec3(flHalfX,  flHalfY, -flHalfZ)
+			Vec3(vMins.x, vMins.y, vMins.z),
+			Vec3(vMaxs.x, vMins.y, vMins.z),
+			Vec3(vMins.x, vMaxs.y, vMins.z),
+			Vec3(vMaxs.x, vMaxs.y, vMins.z),
+			Vec3(vMins.x, vMins.y, vMaxs.z),
+			Vec3(vMaxs.x, vMins.y, vMaxs.z),
+			Vec3(vMins.x, vMaxs.y, vMaxs.z),
+			Vec3(vMaxs.x, vMaxs.y, vMaxs.z)
 		};
 
 		const int iInitialSegments = Vars::AntiAim::FreestandInitialSegments.Value;
@@ -255,7 +239,7 @@ namespace ThreatSampler
 			}
 
 			Vec3 vHeadCenter;
-			Math::VectorTransform(Vec3(0, 0, 0), aTempBones[iBone], vHeadCenter);
+			Math::VectorTransform(vHeadLocalCenter, aTempBones[iBone], vHeadCenter);
 
 			Vec3 vHeadDelta = vHeadCenter - vCircleCenter;
 			vHeadDelta.z = 0.f;
@@ -313,19 +297,17 @@ namespace ThreatSampler
 		const int iBone = pBox->bone;
 		const Vec3 vMins = pBox->bbmin;
 		const Vec3 vMaxs = pBox->bbmax;
-		const float flHalfX = (vMaxs.x - vMins.x) * 0.5f;
-		const float flHalfY = (vMaxs.y - vMins.y) * 0.5f;
-		const float flHalfZ = (vMaxs.z - vMins.z) * 0.5f;
+		const Vec3 vHeadLocalCenter = (vMins + vMaxs) * 0.5f;
 
 		const Vec3 vLocalCorners[MULTIPOINT_CORNERS] = {
-			Vec3(-flHalfX, -flHalfY,  flHalfZ),
-			Vec3(flHalfX, -flHalfY,  flHalfZ),
-			Vec3(-flHalfX,  flHalfY,  flHalfZ),
-			Vec3(flHalfX,  flHalfY,  flHalfZ),
-			Vec3(-flHalfX, -flHalfY, -flHalfZ),
-			Vec3(flHalfX, -flHalfY, -flHalfZ),
-			Vec3(-flHalfX,  flHalfY, -flHalfZ),
-			Vec3(flHalfX,  flHalfY, -flHalfZ)
+			Vec3(vMins.x, vMins.y, vMins.z),
+			Vec3(vMaxs.x, vMins.y, vMins.z),
+			Vec3(vMins.x, vMaxs.y, vMins.z),
+			Vec3(vMaxs.x, vMaxs.y, vMins.z),
+			Vec3(vMins.x, vMins.y, vMaxs.z),
+			Vec3(vMaxs.x, vMins.y, vMaxs.z),
+			Vec3(vMins.x, vMaxs.y, vMaxs.z),
+			Vec3(vMaxs.x, vMaxs.y, vMaxs.z)
 		};
 
 		const int iInitialSegments = Vars::AntiAim::FreestandInitialSegments.Value;
@@ -344,7 +326,6 @@ namespace ThreatSampler
 			const float flCurrentPitch = bUpPitch ? -89.f : 89.f;
 			const float flHeadYawOffset = bUpPitch ? flHeadYawOffsetUp : flHeadYawOffsetDown;
 			const float flCircleZ = bUpPitch ? flHeadCenterUpZ : flHeadCenterDownZ;
-
 			std::vector<bool>& rSampleHit = bUpPitch ? primaryThreat.m_bSampleHitUp : primaryThreat.m_bSampleHitDown;
 			std::vector<float>& rActualYaw = bUpPitch ? primaryThreat.m_vActualSampleYawUp : primaryThreat.m_vActualSampleYawDown;
 
@@ -368,7 +349,7 @@ namespace ThreatSampler
 				}
 
 				Vec3 vHeadCenter;
-				Math::VectorTransform(Vec3(0, 0, 0), aTempBones[iBone], vHeadCenter);
+				Math::VectorTransform(vHeadLocalCenter, aTempBones[iBone], vHeadCenter);
 
 				Vec3 vHeadDelta = vHeadCenter - vCircleCenter;
 				vHeadDelta.z = 0.f;
@@ -433,19 +414,15 @@ namespace ThreatSampler
 		if (!PoseManipulation::SetupBones(pLocal, aTempBones, flCurrentPitch, flBodyYaw))
 			return 0;
 
-		const float flHalfX = (vHeadMaxs.x - vHeadMins.x) * 0.5f;
-		const float flHalfY = (vHeadMaxs.y - vHeadMins.y) * 0.5f;
-		const float flHalfZ = (vHeadMaxs.z - vHeadMins.z) * 0.5f;
-
 		const Vec3 vLocalCorners[MULTIPOINT_CORNERS] = {
-			Vec3(-flHalfX, -flHalfY,  flHalfZ),
-			Vec3(flHalfX, -flHalfY,  flHalfZ),
-			Vec3(-flHalfX,  flHalfY,  flHalfZ),
-			Vec3(flHalfX,  flHalfY,  flHalfZ),
-			Vec3(-flHalfX, -flHalfY, -flHalfZ),
-			Vec3(flHalfX, -flHalfY, -flHalfZ),
-			Vec3(-flHalfX,  flHalfY, -flHalfZ),
-			Vec3(flHalfX,  flHalfY, -flHalfZ)
+			Vec3(vHeadMins.x, vHeadMins.y, vHeadMins.z),
+			Vec3(vHeadMaxs.x, vHeadMins.y, vHeadMins.z),
+			Vec3(vHeadMins.x, vHeadMaxs.y, vHeadMins.z),
+			Vec3(vHeadMaxs.x, vHeadMaxs.y, vHeadMins.z),
+			Vec3(vHeadMins.x, vHeadMins.y, vHeadMaxs.z),
+			Vec3(vHeadMaxs.x, vHeadMins.y, vHeadMaxs.z),
+			Vec3(vHeadMins.x, vHeadMaxs.y, vHeadMaxs.z),
+			Vec3(vHeadMaxs.x, vHeadMaxs.y, vHeadMaxs.z)
 		};
 
 		CTraceFilterHitscan filter;
@@ -490,19 +467,15 @@ namespace ThreatSampler
 		if (!PoseManipulation::SetupBones(pLocal, aTempBones, flCurrentPitch, flBodyYaw))
 			return 0;
 
-		const float flHalfX = (vHeadMaxs.x - vHeadMins.x) * 0.5f;
-		const float flHalfY = (vHeadMaxs.y - vHeadMins.y) * 0.5f;
-		const float flHalfZ = (vHeadMaxs.z - vHeadMins.z) * 0.5f;
-
 		const Vec3 vLocalCorners[MULTIPOINT_CORNERS] = {
-			Vec3(-flHalfX, -flHalfY,  flHalfZ),
-			Vec3(flHalfX, -flHalfY,  flHalfZ),
-			Vec3(-flHalfX,  flHalfY,  flHalfZ),
-			Vec3(flHalfX,  flHalfY,  flHalfZ),
-			Vec3(-flHalfX, -flHalfY, -flHalfZ),
-			Vec3(flHalfX, -flHalfY, -flHalfZ),
-			Vec3(-flHalfX,  flHalfY, -flHalfZ),
-			Vec3(flHalfX,  flHalfY, -flHalfZ)
+			Vec3(vHeadMins.x, vHeadMins.y, vHeadMins.z),
+			Vec3(vHeadMaxs.x, vHeadMins.y, vHeadMins.z),
+			Vec3(vHeadMins.x, vHeadMaxs.y, vHeadMins.z),
+			Vec3(vHeadMaxs.x, vHeadMaxs.y, vHeadMins.z),
+			Vec3(vHeadMins.x, vHeadMins.y, vHeadMaxs.z),
+			Vec3(vHeadMaxs.x, vHeadMins.y, vHeadMaxs.z),
+			Vec3(vHeadMins.x, vHeadMaxs.y, vHeadMaxs.z),
+			Vec3(vHeadMaxs.x, vHeadMaxs.y, vHeadMaxs.z)
 		};
 
 		int iWorldBlocks = 0;

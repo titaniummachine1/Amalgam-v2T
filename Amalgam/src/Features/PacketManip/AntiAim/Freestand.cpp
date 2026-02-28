@@ -129,6 +129,7 @@ void CFreestand::Run(CTFPlayer* pLocal, CUserCmd* pCmd, float flPitch)
 				HeatmapBuilder::AccumulateThreatSample(flActualYaw, 1.f, iResolution, m_aHeatmapThreatUp, m_iTotalShotsAddedUp);
 			}
 		}
+
 		for (int s = 0; s < iInitialSegments && s < static_cast<int>(primaryThreat.m_bSampleHitDown.size()); s++)
 		{
 			if (primaryThreat.m_bSampleHitDown[s])

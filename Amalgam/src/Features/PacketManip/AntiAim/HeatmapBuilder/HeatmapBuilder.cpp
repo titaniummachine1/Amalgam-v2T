@@ -86,16 +86,13 @@ namespace HeatmapBuilder
 
 		const int iInitialSegments = Vars::AntiAim::FreestandInitialSegments.Value;
 
-		if (!threats.empty())
+		const auto& primaryThreat = threats[0];
+		for (int s = 0; s < iInitialSegments && s < static_cast<int>(primaryThreat.m_bSampleHitUp.size()); s++)
 		{
-			const auto& primaryThreat = threats[0];
-			for (int s = 0; s < iInitialSegments && s < static_cast<int>(primaryThreat.m_bSampleHitUp.size()); s++)
+			if (primaryThreat.m_bSampleHitUp[s])
 			{
-				if (primaryThreat.m_bSampleHitUp[s])
-				{
-					const float flActualYaw = primaryThreat.m_vActualSampleYawUp[s];
-					AccumulateThreatSample(flActualYaw, 1.f, iResolution, pHeatmap, iTotalShots);
-				}
+				const float flActualYaw = primaryThreat.m_vActualSampleYawUp[s];
+				AccumulateThreatSample(flActualYaw, 1.f, iResolution, pHeatmap, iTotalShots);
 			}
 		}
 	}

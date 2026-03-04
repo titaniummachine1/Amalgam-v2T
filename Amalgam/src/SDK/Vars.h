@@ -443,6 +443,9 @@ NAMESPACE_BEGIN(Vars)
 			CVar(IgnoreRazorback, "Ignore razorback", true);
 			CVar(SwingPrediction, "Swing prediction", false);
 			CVar(WhipTeam, "Whip team", false);
+			CVar(ChargeReach, "Charge reach", false);
+			CVar(CritRefill, "Auto crit refill", false);
+			CVar(CritRefillAmount, "Crit refill amount", 5, SLIDER_CLAMP, 1, 25);
 
 			CVar(SwingOffset, "Swing offset", -1, NOSAVE | DEBUGVAR, -1, 1);
 			CVar(SwingPredictLag, "Swing predict lag", true, NOSAVE | DEBUGVAR);

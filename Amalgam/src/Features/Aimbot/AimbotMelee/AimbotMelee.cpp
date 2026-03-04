@@ -1,6 +1,7 @@
-#include "AimbotMelee.h"
+﻿#include "AimbotMelee.h"
 
 #include "../Aimbot.h"
+#include "../../CritHack/CritHack.h"
 #include "../../Simulation/MovementSimulation/MovementSimulation.h"
 #include "../../EnginePrediction/EnginePrediction.h"
 #include "../../Ticks/Ticks.h"
@@ -187,21 +188,37 @@ void CAimbotMelee::UpdateInfo(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCm
 	m_flRange = pWeapon->GetSwingRange();
 
 	int iSimTicks = GetSwingTime(pWeapon), iSwingTicks = GetSwingTime(pWeapon, false);
+	const int iTicksToSmack = TIME_TO_TICKS(std::max(pWeapon->m_flSmackTime() - I::GlobalVars->curtime, 0.f));
+	auto pNetChan = I::EngineClient->GetNetChannelInfo();
+	const int iOutLatencyTicks = pNetChan ? std::max(TIME_TO_TICKS(std::max(pNetChan->GetLatency(FLOW_OUTGOING), 0.f)), 0) : 0;
+	const int iChokeMargin = std::max(I::ClientState ? I::ClientState->chokedcommands : 0, 1);
+	const int iChargeWindow = std::max(iOutLatencyTicks + iChokeMargin, 2);
 
-	if ((Vars::Aimbot::Melee::SwingPrediction.Value && iSimTicks || m_iDoubletapTicks) && G::CanPrimaryAttack && pWeapon->m_flSmackTime() < 0.f)
+	const bool bChargeTrackingSwing = Vars::Aimbot::Melee::ChargeReach.Value
+		&& pLocal->m_iClass() == TF_CLASS_DEMOMAN
+		&& m_eChargeState == ChargeState::Tracking
+		&& pWeapon->m_flSmackTime() > 0.f;
+
+	if (bChargeTrackingSwing)
 	{
-		std::unordered_map<int, MoveStorage> mMoveStorage;
+		iSimTicks = std::max(iTicksToSmack, 1);
+		iSwingTicks = std::max(iTicksToSmack - iChargeWindow, 1);
+	}
 
-		F::MoveSim.Initialize(pLocal, mMoveStorage[I::EngineClient->GetLocalPlayer()], false, !m_iDoubletapTicks);
+	if ((Vars::Aimbot::Melee::SwingPrediction.Value && iSimTicks || m_iDoubletapTicks) && G::CanPrimaryAttack && (pWeapon->m_flSmackTime() < 0.f || bChargeTrackingSwing))
+	{
+		std::unordered_map<int, MoveStorage> mStorage;
+
+		F::MoveSim.Initialize(pLocal, mStorage[I::EngineClient->GetLocalPlayer()], false, !m_iDoubletapTicks);
 		for (auto& tTarget : vTargets)
-			F::MoveSim.Initialize(tTarget.m_pEntity, mMoveStorage[tTarget.m_pEntity->entindex()], false);
+			F::MoveSim.Initialize(tTarget.m_pEntity, mStorage[tTarget.m_pEntity->entindex()], false);
 
 		int iMax = std::max(iSimTicks, m_iDoubletapTicks);
 		int iTicks = iMax; bool bSwung = false;
 		for (int i = 0; i < iTicks; i++) // intended for plocal to collide with targets
 		{
 			{
-				auto& tMoveStorage = mMoveStorage[I::EngineClient->GetLocalPlayer()];
+				auto& tStorage = mStorage[I::EngineClient->GetLocalPlayer()];
 
 				if (!bSwung && (!m_iDoubletapTicks || Vars::Doubletap::AntiWarp.Value && pLocal->m_hGroundEntity() || iMax - i <= iSwingTicks))
 				{
@@ -211,18 +228,18 @@ void CAimbotMelee::UpdateInfo(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCm
 
 					if (pLocal->InCond(TF_COND_SHIELD_CHARGE))
 					{	// demo charge fix for swing pred
-						tMoveStorage.m_MoveData.m_flMaxSpeed = tMoveStorage.m_MoveData.m_flClientMaxSpeed = SDK::MaxSpeed(pLocal, false, true);
-						pLocal->m_flMaxspeed() = tMoveStorage.m_MoveData.m_flMaxSpeed;
+						tStorage.m_MoveData.m_flMaxSpeed = tStorage.m_MoveData.m_flClientMaxSpeed = SDK::MaxSpeed(pLocal, false, true);
+						pLocal->m_flMaxspeed() = tStorage.m_MoveData.m_flMaxSpeed;
 						pLocal->RemoveCond(TF_COND_SHIELD_CHARGE);
 					}
 				}
 				if (m_iDoubletapTicks && Vars::Doubletap::AntiWarp.Value && pLocal->m_hGroundEntity())
-					F::Ticks.AntiWarp(pLocal, pCmd->viewangles.y, tMoveStorage.m_MoveData.m_flForwardMove, tMoveStorage.m_MoveData.m_flSideMove, iMax - i - 1);
+					F::Ticks.AntiWarp(pLocal, pCmd->viewangles.y, tStorage.m_MoveData.m_flForwardMove, tStorage.m_MoveData.m_flSideMove, iMax - i - 1);
 
-				F::MoveSim.RunTick(tMoveStorage);
+				F::MoveSim.RunTick(tStorage);
 				m_mRecordMap[I::EngineClient->GetLocalPlayer()].emplace_front(
 					pLocal->m_flSimulationTime() + TICKS_TO_TIME(i + 1),
-					tMoveStorage.m_MoveData.m_vecAbsOrigin,
+					tStorage.m_MoveData.m_vecAbsOrigin,
 					pLocal->m_vecMins(), pLocal->m_vecMaxs()
 				);
 			}
@@ -231,49 +248,54 @@ void CAimbotMelee::UpdateInfo(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCm
 			{
 				for (auto& tTarget : vTargets)
 				{
-					auto& tMoveStorage = mMoveStorage[tTarget.m_pEntity->entindex()];
-					if (tMoveStorage.m_bFailed)
+					auto& tStorage = mStorage[tTarget.m_pEntity->entindex()];
+					if (tStorage.m_bFailed)
 						continue;
 
-					F::MoveSim.RunTick(tMoveStorage);
+					F::MoveSim.RunTick(tStorage);
 					m_mRecordMap[tTarget.m_pEntity->entindex()].emplace_front(
-						!Vars::Aimbot::Melee::SwingPredictLag.Value || tMoveStorage.m_bPredictNetworked ? tTarget.m_pEntity->m_flSimulationTime() + TICKS_TO_TIME(i + 1) : 0.f,
-						Vars::Aimbot::Melee::SwingPredictLag.Value ? tMoveStorage.m_vPredictedOrigin : tMoveStorage.m_MoveData.m_vecAbsOrigin,
+						!Vars::Aimbot::Melee::SwingPredictLag.Value || tStorage.m_bPredictNetworked ? tTarget.m_pEntity->m_flSimulationTime() + TICKS_TO_TIME(i + 1) : 0.f,
+						Vars::Aimbot::Melee::SwingPredictLag.Value ? tStorage.m_vPredictedOrigin : tStorage.m_MoveData.m_vecAbsOrigin,
 						tTarget.m_pEntity->m_vecMins(), tTarget.m_pEntity->m_vecMaxs()
 					);
 				}
 			}
 		}
-		m_vEyePos = mMoveStorage[I::EngineClient->GetLocalPlayer()].m_MoveData.m_vecAbsOrigin + pLocal->m_vecViewOffset();
+		m_vEyePos = mStorage[I::EngineClient->GetLocalPlayer()].m_MoveData.m_vecAbsOrigin + pLocal->m_vecViewOffset();
 		m_flRange = pWeapon->GetSwingRange();
 
 		if (Vars::Visuals::Simulation::SwingLines.Value && Vars::Visuals::Simulation::PlayerPath.Value)
 		{
-			for (auto& [iIndex, tMoveStorage] : mMoveStorage)
-				m_mPaths[iIndex] = tMoveStorage.m_vPath;
+			for (auto& [iIndex, tStorage] : mStorage)
+				m_mPaths[iIndex] = tStorage.m_vPath;
 
-			const bool bAlwaysDraw = !Vars::Aimbot::General::AutoShoot.Value || Vars::Debug::Info.Value;
-			if (bAlwaysDraw)
+			G::LineStorage.clear();
+			G::BoxStorage.clear();
+			G::PathStorage.clear();
+
+			for (auto& [_, vPath] : m_mPaths)
 			{
-				G::LineStorage.clear();
-				G::BoxStorage.clear();
-				G::PathStorage.clear();
-
-				for (auto& [_, vPath] : m_mPaths)
-				{
-					if (Vars::Colors::PlayerPathIgnoreZ.Value.a)
-						G::PathStorage.emplace_back(vPath, I::GlobalVars->curtime + Vars::Visuals::Simulation::DrawDuration.Value, Vars::Colors::PlayerPathIgnoreZ.Value, Vars::Visuals::Simulation::PlayerPath.Value);
-					if (Vars::Colors::PlayerPath.Value.a)
-						G::PathStorage.emplace_back(vPath, I::GlobalVars->curtime + Vars::Visuals::Simulation::DrawDuration.Value, Vars::Colors::PlayerPath.Value, Vars::Visuals::Simulation::PlayerPath.Value, true);
-				}
+				if (Vars::Colors::PlayerPathIgnoreZ.Value.a)
+					G::PathStorage.emplace_back(vPath, I::GlobalVars->curtime + Vars::Visuals::Simulation::DrawDuration.Value, Vars::Colors::PlayerPathIgnoreZ.Value, Vars::Visuals::Simulation::PlayerPath.Value);
+				if (Vars::Colors::PlayerPath.Value.a)
+					G::PathStorage.emplace_back(vPath, I::GlobalVars->curtime + Vars::Visuals::Simulation::DrawDuration.Value, Vars::Colors::PlayerPath.Value, Vars::Visuals::Simulation::PlayerPath.Value, true);
 			}
 		}
 
-		for (auto& [_, tMoveStorage] : mMoveStorage)
-			F::MoveSim.Restore(tMoveStorage);
+		for (auto& [_, tStorage] : mStorage)
+			F::MoveSim.Restore(tStorage);
 	}
 
 	m_bShouldSwing = m_iDoubletapTicks <= iSwingTicks || Vars::Doubletap::AntiWarp.Value && pLocal->m_hGroundEntity();
+
+	// Extend melee range to charge-reach distance when Demoman has full charge and exploit is ready
+	if (Vars::Aimbot::Melee::ChargeReach.Value &&
+		pLocal->m_iClass() == TF_CLASS_DEMOMAN &&
+		pLocal->m_flChargeMeter() >= 100.f &&
+		!pLocal->InCond(TF_COND_SHIELD_CHARGE))
+	{
+		m_flRange = 128.f;
+	}
 }
 
 bool CAimbotMelee::CanBackstab(CBaseEntity* pTarget, CTFPlayer* pLocal, Vec3 vEyeAngles)
@@ -294,7 +316,7 @@ bool CAimbotMelee::CanBackstab(CBaseEntity* pTarget, CTFPlayer* pLocal, Vec3 vEy
 	}
 
 	Vec3 vEyePos = m_vEyePos;
-	const float flCompDist = PLAYER_ORIGIN_COMPRESSION / 2;
+	const float flCompDist = 0.0625f;
 	const float flSqCompDist = 0.0884f;
 
 	if (auto pCmd = G::CurrentUserCmd;
@@ -415,8 +437,8 @@ int CAimbotMelee::CanHit(Target_t& tTarget, CTFPlayer* pLocal, CTFWeaponBase* pW
 		Vec3 vRestoreMaxs = tTarget.m_pEntity->m_vecMaxs();
 
 		tTarget.m_pEntity->SetAbsOrigin(pRecord->m_vOrigin);
-		tTarget.m_pEntity->m_vecMins() = pRecord->m_vMins + PLAYER_ORIGIN_COMPRESSION; // account for origin compression
-		tTarget.m_pEntity->m_vecMaxs() = pRecord->m_vMaxs - PLAYER_ORIGIN_COMPRESSION;
+		tTarget.m_pEntity->m_vecMins() = pRecord->m_vMins + 0.125f; // account for origin compression
+		tTarget.m_pEntity->m_vecMaxs() = pRecord->m_vMaxs - 0.125f;
 
 		Vec3 vDiff = { 0, 0, std::clamp(m_vEyePos.z - pRecord->m_vOrigin.z, pRecord->m_vMins.z, pRecord->m_vMaxs.z) };
 		tTarget.m_vPos = pRecord->m_vOrigin + vDiff;
@@ -467,6 +489,82 @@ int CAimbotMelee::CanHit(Target_t& tTarget, CTFPlayer* pLocal, CTFWeaponBase* pW
 	}
 
 	return false;
+}
+
+bool CAimbotMelee::ShouldCommitChargeReach(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd, CBaseEntity* pTarget, int iTicksToSmack)
+{
+	if (!pLocal || !pWeapon || !pCmd || !pTarget)
+		return false;
+	if (Vars::Aimbot::General::DisableOnSpectate.Value && H::Entities.IsSpectated())
+		return false;
+
+	auto pTargetPlayer = pTarget->As<CTFPlayer>();
+	if (!pTargetPlayer || !pTargetPlayer->IsAlive() || pTarget->IsDormant())
+		return false;
+
+	MoveStorage tLocalStorage = {};
+	MoveStorage tTargetStorage = {};
+	if (!F::MoveSim.Initialize(pLocal, tLocalStorage, false, false))
+		return false;
+
+	if (!F::MoveSim.Initialize(pTarget, tTargetStorage, false, false))
+	{
+		F::MoveSim.Restore(tLocalStorage);
+		return false;
+	}
+
+	float flRange = SDK::AttribHookValue(m_flRange, "melee_range_multiplier", pWeapon);
+	float flHull = SDK::AttribHookValue(18.f, "melee_bounds_multiplier", pWeapon);
+	if (pLocal->m_flModelScale() > 1.0f)
+	{
+		flRange *= pLocal->m_flModelScale();
+		flHull *= pLocal->m_flModelScale();
+	}
+	Vec3 vSwingMins = { -flHull, -flHull, -flHull };
+	Vec3 vSwingMaxs = { flHull, flHull, flHull };
+
+	const float flChargeSpeed = std::max(SDK::MaxSpeed(pLocal), 750.f);
+	const int iSimTicks = std::clamp(iTicksToSmack, 1, 24);
+	bool bCanHitAfterCharge = false;
+
+	for (int i = 0; i < iSimTicks; i++)
+	{
+		tLocalStorage.m_MoveData.m_flForwardMove = 450.f;
+		tLocalStorage.m_MoveData.m_flSideMove = 0.f;
+		tLocalStorage.m_MoveData.m_flUpMove = 0.f;
+		tLocalStorage.m_MoveData.m_flMaxSpeed = flChargeSpeed;
+		tLocalStorage.m_MoveData.m_flClientMaxSpeed = flChargeSpeed;
+		tLocalStorage.m_MoveData.m_vecViewAngles = { 0.f, pCmd->viewangles.y, 0.f };
+		F::MoveSim.RunTick(tLocalStorage, false);
+		F::MoveSim.RunTick(tTargetStorage, false);
+
+		Vec3 vEyePos = tLocalStorage.m_MoveData.m_vecAbsOrigin + pLocal->m_vecViewOffset();
+		Vec3 vTargetPos = tTargetStorage.m_MoveData.m_vecAbsOrigin;
+		vTargetPos.z += std::clamp(vEyePos.z - vTargetPos.z, pTarget->m_vecMins().z, pTarget->m_vecMaxs().z);
+
+		Vec3 vAimAngles = Math::CalcAngle(vEyePos, vTargetPos);
+		vAimAngles.x = 0.f;
+		Math::ClampAngles(vAimAngles);
+
+		Vec3 vForward; Math::AngleVectors(vAimAngles, &vForward);
+		Vec3 vTraceEnd = vEyePos + (vForward * flRange);
+
+		CGameTrace trace = {};
+		CTraceFilterHitscan filter(pLocal);
+		SDK::TraceHull(vEyePos, vTraceEnd, {}, {}, MASK_SOLID, &filter, &trace);
+		if (!(trace.m_pEnt && trace.m_pEnt == pTarget))
+			SDK::TraceHull(vEyePos, vTraceEnd, vSwingMins, vSwingMaxs, MASK_SOLID, &filter, &trace);
+
+		if (trace.m_pEnt && trace.m_pEnt == pTarget)
+		{
+			bCanHitAfterCharge = true;
+			break;
+		}
+	}
+
+	F::MoveSim.Restore(tTargetStorage);
+	F::MoveSim.Restore(tLocalStorage);
+	return bCanHitAfterCharge;
 }
 
 
@@ -615,6 +713,64 @@ static inline void DrawVisuals(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserC
 
 void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 {
+	// Charge reach follow-up: fires IN_ATTACK2 at the right moment (1-2 tick window before smack)
+	// Runs before all early returns so charge can still execute if target leaves normal melee range mid-swing
+	if (pLocal->m_iClass() == TF_CLASS_DEMOMAN && pWeapon->m_flSmackTime() > 0.f)
+	{
+		switch (m_eChargeState)
+		{
+		case ChargeState::Tracking:
+			if (pLocal->InCond(TF_COND_SHIELD_CHARGE)
+				|| pLocal->m_flChargeMeter() < 100.f
+				|| (Vars::Aimbot::General::DisableOnSpectate.Value && H::Entities.IsSpectated()))
+			{
+				m_eChargeState = ChargeState::Idle;
+				m_iChargeTarget = -1;
+			}
+			else
+			{
+				const int iTicksToSmack = TIME_TO_TICKS(std::max(pWeapon->m_flSmackTime() - I::GlobalVars->curtime, 0.f));
+				auto pNetChan = I::EngineClient->GetNetChannelInfo();
+				const int iOutLatencyTicks = pNetChan ? std::max(TIME_TO_TICKS(std::max(pNetChan->GetLatency(FLOW_OUTGOING), 0.f)), 0) : 0;
+				const int iChokeMargin = std::max(I::ClientState ? I::ClientState->chokedcommands : 0, 1);
+				const int iChargeWindow = std::max(iOutLatencyTicks + iChokeMargin, 2);
+
+				if (iTicksToSmack <= iChargeWindow)
+				{
+					auto pTarget = I::ClientEntityList->GetClientEntity(m_iChargeTarget);
+					auto pTargetBase = pTarget ? pTarget->As<CBaseEntity>() : nullptr;
+					if (ShouldCommitChargeReach(pLocal, pWeapon, pCmd, pTargetBase, iTicksToSmack))
+						m_eChargeState = ChargeState::Charge;
+					else
+					{
+						m_eChargeState = ChargeState::Idle;
+						m_iChargeTarget = -1;
+					}
+				}
+				else if (++m_iChargeTicks > 25)
+				{
+					m_eChargeState = ChargeState::Idle;
+					m_iChargeTarget = -1;
+				}
+			}
+			break;
+		case ChargeState::Charge:
+			pCmd->buttons |= IN_ATTACK2;
+			G::SendPacket = true;
+			m_eChargeState = ChargeState::Idle;
+			m_iChargeTarget = -1;
+			break;
+		case ChargeState::Idle:
+		default:
+			break;
+		}
+	}
+	else if (pWeapon->m_flSmackTime() <= 0.f)
+	{
+		m_eChargeState = ChargeState::Idle;
+		m_iChargeTarget = -1;
+	}
+
 	static int iStaticAimType = Vars::Aimbot::General::AimType.Value;
 	const int iLastAimType = iStaticAimType;
 	const int iRealAimType = Vars::Aimbot::General::AimType.Value;
@@ -636,8 +792,44 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 		return;
 
 	auto vTargets = F::AimbotGlobal.ManageTargets(GetTargets, pLocal, pWeapon, Vars::Aimbot::General::TargetSelectionEnum::Distance);
+	const bool bHasCurrentTargets = !vTargets.empty();
+	// Auto crit refill: check before target processing
+	if (Vars::Aimbot::Melee::CritRefill.Value && pWeapon->m_flSmackTime() < 0.f && !bHasCurrentTargets)
+	{
+		constexpr float flChargeReachDistance = 128.f;
+		const float flMinCombatReadyDistance = flChargeReachDistance * 2.f;
+		float flClosestEnemyDistance = FLT_MAX;
+
+		for (auto pEntity : H::Entities.GetGroup(EntityEnum::PlayerEnemy))
+		{
+			auto pPlayer = pEntity->As<CTFPlayer>();
+			if (!pPlayer || !pPlayer->IsAlive() || pEntity->IsDormant())
+				continue;
+
+			flClosestEnemyDistance = std::min(flClosestEnemyDistance, pLocal->GetAbsOrigin().DistTo(pEntity->GetAbsOrigin()));
+		}
+
+		const bool bSafeToRefill = flClosestEnemyDistance > flMinCombatReadyDistance;
+		if (bSafeToRefill && F::CritHack.GetAvailableCrits() < Vars::Aimbot::Melee::CritRefillAmount.Value)
+		{
+			F::CritHack.m_bCritRefillActive = true;
+			if (G::CanPrimaryAttack)
+			{
+				pCmd->buttons |= IN_ATTACK;
+				return;
+			}
+		}
+		else
+			F::CritHack.m_bCritRefillActive = false;
+	}
+	else
+		F::CritHack.m_bCritRefillActive = false;
+
 	if (vTargets.empty())
+	{
 		return;
+	}
+	F::CritHack.m_bCritRefillActive = false;
 
 	//if (!G::AimTarget.m_iEntIndex)
 	//	G::AimTarget = { vTargets.front().m_pEntity->entindex(), I::GlobalVars->tickcount, 0 };
@@ -668,6 +860,20 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 
 		if (G::Attacking = SDK::IsAttacking(pLocal, pWeapon, pCmd, true))
 			F::Aimbot.m_eRanType = EWeaponType::MELEE;
+
+		if ((pCmd->buttons & IN_ATTACK) && G::CanPrimaryAttack && pWeapon->m_flSmackTime() < 0.f
+			&& Vars::Aimbot::Melee::ChargeReach.Value &&
+			pLocal->m_iClass() == TF_CLASS_DEMOMAN &&
+			pLocal->m_flChargeMeter() >= 100.f &&
+			!pLocal->InCond(TF_COND_SHIELD_CHARGE) &&
+			!(Vars::Aimbot::General::DisableOnSpectate.Value && H::Entities.IsSpectated()) &&
+			m_eChargeState == ChargeState::Idle)
+		{
+			m_eChargeState = ChargeState::Tracking;
+			m_iChargeTicks = 0;
+			m_iChargeTarget = tTarget.m_pEntity->entindex();
+		}
+
 		if (G::Attacking == 1)
 		{
 			if (tTarget.m_bBacktrack)
@@ -766,7 +972,7 @@ bool CAimbotMelee::RunSapper(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd
 	else
 		bShouldAim = pCmd->buttons & IN_ATTACK;
 	if (Vars::Aimbot::General::AimType.Value == Vars::Aimbot::General::AimTypeEnum::Silent)
-		bShouldAim &= !I::ClientState->chokedcommands && F::Ticks.CanChoke(true);
+		bShouldAim = bShouldAim && !I::ClientState->chokedcommands && F::Ticks.CanChoke(true);
 
 	if (bShouldAim)
 	{

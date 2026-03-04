@@ -1,4 +1,4 @@
-﻿#include "AimbotMelee.h"
+#include "AimbotMelee.h"
 
 #include "../Aimbot.h"
 #include "../../CritHack/CritHack.h"

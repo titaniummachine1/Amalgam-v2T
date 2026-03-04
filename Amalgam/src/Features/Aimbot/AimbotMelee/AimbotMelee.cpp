@@ -269,16 +269,20 @@ void CAimbotMelee::UpdateInfo(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCm
 			for (auto& [iIndex, tStorage] : mStorage)
 				m_mPaths[iIndex] = tStorage.m_vPath;
 
-			G::LineStorage.clear();
-			G::BoxStorage.clear();
-			G::PathStorage.clear();
-
-			for (auto& [_, vPath] : m_mPaths)
+			const bool bAlwaysDraw = !Vars::Aimbot::General::AutoShoot.Value || Vars::Debug::Info.Value;
+			if (bAlwaysDraw)
 			{
-				if (Vars::Colors::PlayerPathIgnoreZ.Value.a)
-					G::PathStorage.emplace_back(vPath, I::GlobalVars->curtime + Vars::Visuals::Simulation::DrawDuration.Value, Vars::Colors::PlayerPathIgnoreZ.Value, Vars::Visuals::Simulation::PlayerPath.Value);
-				if (Vars::Colors::PlayerPath.Value.a)
-					G::PathStorage.emplace_back(vPath, I::GlobalVars->curtime + Vars::Visuals::Simulation::DrawDuration.Value, Vars::Colors::PlayerPath.Value, Vars::Visuals::Simulation::PlayerPath.Value, true);
+				G::LineStorage.clear();
+				G::BoxStorage.clear();
+				G::PathStorage.clear();
+
+				for (auto& [_, vPath] : m_mPaths)
+				{
+					if (Vars::Colors::PlayerPathIgnoreZ.Value.a)
+						G::PathStorage.emplace_back(vPath, I::GlobalVars->curtime + Vars::Visuals::Simulation::DrawDuration.Value, Vars::Colors::PlayerPathIgnoreZ.Value, Vars::Visuals::Simulation::PlayerPath.Value);
+					if (Vars::Colors::PlayerPath.Value.a)
+						G::PathStorage.emplace_back(vPath, I::GlobalVars->curtime + Vars::Visuals::Simulation::DrawDuration.Value, Vars::Colors::PlayerPath.Value, Vars::Visuals::Simulation::PlayerPath.Value, true);
+				}
 			}
 		}
 
@@ -810,14 +814,11 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 		}
 
 		const bool bSafeToRefill = flClosestEnemyDistance > flMinCombatReadyDistance;
-		if (bSafeToRefill && F::CritHack.GetAvailableCrits() < Vars::Aimbot::Melee::CritRefillAmount.Value)
+		if (bSafeToRefill && F::CritHack.GetAvailableCrits() < Vars::Aimbot::Melee::CritRefillAmount.Value && G::CanPrimaryAttack)
 		{
 			F::CritHack.m_bCritRefillActive = true;
-			if (G::CanPrimaryAttack)
-			{
-				pCmd->buttons |= IN_ATTACK;
-				return;
-			}
+			pCmd->buttons |= IN_ATTACK;
+			return;
 		}
 		else
 			F::CritHack.m_bCritRefillActive = false;

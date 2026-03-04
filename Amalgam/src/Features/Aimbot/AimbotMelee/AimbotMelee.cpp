@@ -499,8 +499,6 @@ bool CAimbotMelee::ShouldCommitChargeReach(CTFPlayer* pLocal, CTFWeaponBase* pWe
 {
 	if (!pLocal || !pWeapon || !pCmd || !pTarget)
 		return false;
-	if (Vars::Aimbot::General::DisableOnSpectate.Value && H::Entities.IsSpectated())
-		return false;
 
 	auto pTargetPlayer = pTarget->As<CTFPlayer>();
 	if (!pTargetPlayer || !pTargetPlayer->IsAlive() || pTarget->IsDormant())
@@ -725,8 +723,7 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 		{
 		case ChargeState::Tracking:
 			if (pLocal->InCond(TF_COND_SHIELD_CHARGE)
-				|| pLocal->m_flChargeMeter() < 100.f
-				|| (Vars::Aimbot::General::DisableOnSpectate.Value && H::Entities.IsSpectated()))
+				|| pLocal->m_flChargeMeter() < 100.f)
 			{
 				m_eChargeState = ChargeState::Idle;
 				m_iChargeTarget = -1;
@@ -867,7 +864,6 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 			pLocal->m_iClass() == TF_CLASS_DEMOMAN &&
 			pLocal->m_flChargeMeter() >= 100.f &&
 			!pLocal->InCond(TF_COND_SHIELD_CHARGE) &&
-			!(Vars::Aimbot::General::DisableOnSpectate.Value && H::Entities.IsSpectated()) &&
 			m_eChargeState == ChargeState::Idle)
 		{
 			m_eChargeState = ChargeState::Tracking;

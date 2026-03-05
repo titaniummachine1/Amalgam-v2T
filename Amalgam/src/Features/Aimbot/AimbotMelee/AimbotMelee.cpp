@@ -728,7 +728,6 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 				|| pLocal->m_flChargeMeter() < 100.f)
 			{
 				m_eChargeState = ChargeState::Idle;
-				m_iChargeStartTick = 0;
 				m_iChargeTarget = -1;
 			}
 			else
@@ -749,14 +748,12 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 					else
 					{
 						m_eChargeState = ChargeState::Idle;
-						m_iChargeStartTick = 0;
 						m_iChargeTarget = -1;
 					}
 				}
 				else if (++m_iChargeTicks > 25)
 				{
 					m_eChargeState = ChargeState::Idle;
-					m_iChargeStartTick = 0;
 					m_iChargeTarget = -1;
 				}
 			}
@@ -765,7 +762,6 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 			pCmd->buttons |= IN_ATTACK2;
 			G::SendPacket = true;
 			m_eChargeState = ChargeState::Idle;
-			m_iChargeStartTick = 0;
 			m_iChargeTarget = -1;
 			break;
 		case ChargeState::Idle:
@@ -776,7 +772,6 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 	else if (pWeapon->m_flSmackTime() <= 0.f)
 	{
 		m_eChargeState = ChargeState::Idle;
-		m_iChargeStartTick = 0;
 		m_iChargeTarget = -1;
 	}
 
@@ -800,65 +795,50 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 	if (RunSapper(pLocal, pWeapon, pCmd))
 		return;
 
-	// Auto crit refill: check before target processing
-	if (Vars::Aimbot::Melee::CritRefill.Value && pWeapon->m_flSmackTime() < 0.f)
+	auto vTargets = F::AimbotGlobal.ManageTargets(GetTargets, pLocal, pWeapon, Vars::Aimbot::General::TargetSelectionEnum::Distance);
+	bool bHasSimulatedTargets = false;
+	if (!vTargets.empty())
 	{
-		// Check if any enemy has simulation records (combat)
-		bool bHasSimulatedTargets = false;
-		for (auto pEntity : H::Entities.GetGroup(EntityEnum::PlayerEnemy))
+		UpdateInfo(pLocal, pWeapon, pCmd, vTargets);
+		for (const auto& tTarget : vTargets)
 		{
-			auto pPlayer = pEntity ? pEntity->As<CTFPlayer>() : nullptr;
-			if (!pPlayer || !pPlayer->IsAlive() || pEntity->IsDormant())
+			if (tTarget.m_pEntity->m_iTeamNum() == pLocal->m_iTeamNum())
 				continue;
-			auto it = m_mRecordMap.find(pEntity->entindex());
+			auto it = m_mRecordMap.find(tTarget.m_pEntity->entindex());
 			if (it != m_mRecordMap.end() && !it->second.empty())
 			{
 				bHasSimulatedTargets = true;
 				break;
 			}
 		}
+	}
 
-		if (bHasSimulatedTargets)
+	if (Vars::Aimbot::Melee::CritRefill.Value && pWeapon->m_flSmackTime() < 0.f && !bHasSimulatedTargets)
+	{
+		const float flMinCombatReadyDistance = kChargeReachDistance * 2.f;
+		float flClosestEnemyDistance = FLT_MAX;
+		for (auto pEntity : H::Entities.GetGroup(EntityEnum::PlayerEnemy))
 		{
-			F::CritHack.m_bCritRefillActive = false;
-			// proceed to normal targeting
+			auto pPlayer = pEntity ? pEntity->As<CTFPlayer>() : nullptr;
+			if (!pPlayer || !pPlayer->IsAlive() || pEntity->IsDormant())
+				continue;
+			flClosestEnemyDistance = std::min(flClosestEnemyDistance, pLocal->GetAbsOrigin().DistTo(pEntity->GetAbsOrigin()));
 		}
-		else
+
+		const bool bSafeToRefill = flClosestEnemyDistance > flMinCombatReadyDistance;
+		if (bSafeToRefill && F::CritHack.GetAvailableCrits() < Vars::Aimbot::Melee::CritRefillAmount.Value && G::CanPrimaryAttack)
 		{
-			const float flMinCombatReadyDistance = kChargeReachDistance * 2.f;
-			float flClosestEnemyDistance = FLT_MAX;
-
-			for (auto pEntity : H::Entities.GetGroup(EntityEnum::PlayerEnemy))
-			{
-				auto pPlayer = pEntity->As<CTFPlayer>();
-				if (!pPlayer || !pPlayer->IsAlive() || pEntity->IsDormant())
-					continue;
-
-				flClosestEnemyDistance = std::min(flClosestEnemyDistance, pLocal->GetAbsOrigin().DistTo(pEntity->GetAbsOrigin()));
-			}
-
-			const bool bSafeToRefill = flClosestEnemyDistance > flMinCombatReadyDistance;
-			if (bSafeToRefill && F::CritHack.GetAvailableCrits() < Vars::Aimbot::Melee::CritRefillAmount.Value && G::CanPrimaryAttack)
-			{
-				F::CritHack.m_bCritRefillActive = true;
-				pCmd->buttons |= IN_ATTACK;
-				return;
-			}
-			else
-				F::CritHack.m_bCritRefillActive = false;
+			F::CritHack.m_bCritRefillActive = true;
+			pCmd->buttons |= IN_ATTACK;
+			return;
 		}
 	}
-	else
-		F::CritHack.m_bCritRefillActive = false;
-
-	auto vTargets = F::AimbotGlobal.ManageTargets(GetTargets, pLocal, pWeapon, Vars::Aimbot::General::TargetSelectionEnum::Distance);
-	UpdateInfo(pLocal, pWeapon, pCmd, vTargets);
+	F::CritHack.m_bCritRefillActive = false;
 
 	if (vTargets.empty())
 	{
 		return;
 	}
-	F::CritHack.m_bCritRefillActive = false;
 
 	auto ArmChargeTracking = [&](const Target_t& tTarget)
 	{
@@ -871,7 +851,6 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 		{
 			m_eChargeState = ChargeState::Tracking;
 			m_iChargeTicks = 0;
-			m_iChargeStartTick = I::GlobalVars->tickcount;
 			m_iChargeTarget = tTarget.m_pEntity->entindex();
 		}
 	};

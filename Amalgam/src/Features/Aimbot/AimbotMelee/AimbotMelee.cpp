@@ -9,6 +9,7 @@
 #include "../../NavBot/BotUtils.h"
 
 static constexpr float kChargeReachDistance = 128.f;
+static constexpr float kCritRefillCombatDistance = 500.f;
 
 static inline bool AimFriendlyBuilding(CTFPlayer* pLocal, CBaseObject* pBuilding)
 {
@@ -796,7 +797,7 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 		return;
 
 	auto vTargets = F::AimbotGlobal.ManageTargets(GetTargets, pLocal, pWeapon, Vars::Aimbot::General::TargetSelectionEnum::Distance);
-	bool bHasSimulatedTargets = false;
+	bool bHasCombatSimulation = false;
 	if (!vTargets.empty())
 	{
 		UpdateInfo(pLocal, pWeapon, pCmd, vTargets);
@@ -805,28 +806,20 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 			if (tTarget.m_pEntity->m_iTeamNum() == pLocal->m_iTeamNum())
 				continue;
 			auto it = m_mRecordMap.find(tTarget.m_pEntity->entindex());
-			if (it != m_mRecordMap.end() && !it->second.empty())
+			if (it == m_mRecordMap.end() || it->second.empty())
+				continue;
+
+			if (pLocal->GetAbsOrigin().DistTo(tTarget.m_pEntity->GetAbsOrigin()) <= kCritRefillCombatDistance)
 			{
-				bHasSimulatedTargets = true;
+				bHasCombatSimulation = true;
 				break;
 			}
 		}
 	}
 
-	if (Vars::Aimbot::Melee::CritRefill.Value && pWeapon->m_flSmackTime() < 0.f && !bHasSimulatedTargets)
+	if (Vars::Aimbot::Melee::CritRefill.Value && pWeapon->m_flSmackTime() < 0.f && !bHasCombatSimulation)
 	{
-		const float flMinCombatReadyDistance = kChargeReachDistance * 2.f;
-		float flClosestEnemyDistance = FLT_MAX;
-		for (auto pEntity : H::Entities.GetGroup(EntityEnum::PlayerEnemy))
-		{
-			auto pPlayer = pEntity ? pEntity->As<CTFPlayer>() : nullptr;
-			if (!pPlayer || !pPlayer->IsAlive() || pEntity->IsDormant())
-				continue;
-			flClosestEnemyDistance = std::min(flClosestEnemyDistance, pLocal->GetAbsOrigin().DistTo(pEntity->GetAbsOrigin()));
-		}
-
-		const bool bSafeToRefill = flClosestEnemyDistance > flMinCombatReadyDistance;
-		if (bSafeToRefill && F::CritHack.GetAvailableCrits() < Vars::Aimbot::Melee::CritRefillAmount.Value && G::CanPrimaryAttack)
+		if (F::CritHack.GetAvailableCrits() < Vars::Aimbot::Melee::CritRefillAmount.Value && G::CanPrimaryAttack)
 		{
 			F::CritHack.m_bCritRefillActive = true;
 			pCmd->buttons |= IN_ATTACK;

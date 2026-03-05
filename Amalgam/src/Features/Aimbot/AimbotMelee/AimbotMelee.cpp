@@ -8,6 +8,8 @@
 #include "../../Visuals/Visuals.h"
 #include "../../NavBot/BotUtils.h"
 
+static constexpr float kChargeReachDistance = 128.f;
+
 static inline bool AimFriendlyBuilding(CTFPlayer* pLocal, CBaseObject* pBuilding)
 {
 	int iCurrMetal = pLocal->m_iMetalCount();
@@ -298,7 +300,7 @@ void CAimbotMelee::UpdateInfo(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCm
 		pLocal->m_flChargeMeter() >= 100.f &&
 		!pLocal->InCond(TF_COND_SHIELD_CHARGE))
 	{
-		m_flRange = 128.f;
+		m_flRange = kChargeReachDistance;
 	}
 }
 
@@ -320,8 +322,8 @@ bool CAimbotMelee::CanBackstab(CBaseEntity* pTarget, CTFPlayer* pLocal, Vec3 vEy
 	}
 
 	Vec3 vEyePos = m_vEyePos;
-	const float flCompDist = 0.0625f;
-	const float flSqCompDist = 0.0884f;
+	const float flCompDist = PLAYER_ORIGIN_COMPRESSION / 2.0f;
+	const float flSqCompDist = flCompDist * 1.41421356f;
 
 	if (auto pCmd = G::CurrentUserCmd;
 		m_mRecordMap[pLocal->entindex()].empty() && pCmd->viewangles != vEyeAngles && G::CanPrimaryAttack)
@@ -441,8 +443,8 @@ int CAimbotMelee::CanHit(Target_t& tTarget, CTFPlayer* pLocal, CTFWeaponBase* pW
 		Vec3 vRestoreMaxs = tTarget.m_pEntity->m_vecMaxs();
 
 		tTarget.m_pEntity->SetAbsOrigin(pRecord->m_vOrigin);
-		tTarget.m_pEntity->m_vecMins() = pRecord->m_vMins + 0.125f; // account for origin compression
-		tTarget.m_pEntity->m_vecMaxs() = pRecord->m_vMaxs - 0.125f;
+		tTarget.m_pEntity->m_vecMins() = pRecord->m_vMins + PLAYER_ORIGIN_COMPRESSION; // account for origin compression
+		tTarget.m_pEntity->m_vecMaxs() = pRecord->m_vMaxs - PLAYER_ORIGIN_COMPRESSION;
 
 		Vec3 vDiff = { 0, 0, std::clamp(m_vEyePos.z - pRecord->m_vOrigin.z, pRecord->m_vMins.z, pRecord->m_vMaxs.z) };
 		tTarget.m_vPos = pRecord->m_vOrigin + vDiff;
@@ -823,8 +825,7 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 		}
 		else
 		{
-			constexpr float flChargeReachDistance = 128.f;
-			const float flMinCombatReadyDistance = flChargeReachDistance * 2.f;
+			const float flMinCombatReadyDistance = kChargeReachDistance * 2.f;
 			float flClosestEnemyDistance = FLT_MAX;
 
 			for (auto pEntity : H::Entities.GetGroup(EntityEnum::PlayerEnemy))

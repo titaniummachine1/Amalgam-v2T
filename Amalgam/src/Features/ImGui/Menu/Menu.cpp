@@ -520,12 +520,12 @@ void CMenu::MenuAimbot(int iTab)
 					FToggle(Vars::Aimbot::Melee::AutoBackstab, FToggleEnum::Left);
 					FToggle(Vars::Aimbot::Melee::IgnoreRazorback, FToggleEnum::Right);
 					FToggle(Vars::Aimbot::Melee::SwingPrediction, FToggleEnum::Left);
+					FToggle(Vars::Aimbot::Melee::WhipTeam, FToggleEnum::Right);
 					PushTransparent(!Vars::Aimbot::Melee::SwingPrediction.Value);
 					{
-						FSlider(Vars::Aimbot::General::TickTolerance, FSliderEnum::Right);
+						FSlider(Vars::Aimbot::General::TickTolerance, FSliderEnum::Left);
 					}
 					PopTransparent();
-					FToggle(Vars::Aimbot::Melee::WhipTeam, FToggleEnum::Right);
 					FToggle(Vars::CritHack::AlwaysMeleeCrit, FToggleEnum::Left);
 					FToggle(Vars::Aimbot::Melee::ChargeReach, FToggleEnum::Right);
 					FToggle(Vars::Aimbot::Melee::CritRefill, FToggleEnum::Left);

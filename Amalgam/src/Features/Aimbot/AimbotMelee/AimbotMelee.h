@@ -26,6 +26,7 @@ private:
 	enum class ChargeState { Idle, Tracking, Charge };
 	ChargeState m_eChargeState = ChargeState::Idle;
 	int m_iChargeTicks = 0;
+	int m_iChargeStartTick = 0;
 	int m_iChargeTarget = -1;
 
 	std::unordered_map<int, std::deque<TickRecord>> m_mRecordMap;

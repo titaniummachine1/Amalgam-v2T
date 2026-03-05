@@ -806,7 +806,11 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 	for (const auto& tTarget : vTargets)
 	{
 		auto it = m_mRecordMap.find(tTarget.m_pEntity->entindex());
-		if (it != m_mRecordMap.end() && !it->second.empty())
+		if (it == m_mRecordMap.end() || it->second.empty())
+			continue;
+
+		auto tProbeTarget = tTarget;
+		if (CanHit(tProbeTarget, pLocal, pWeapon))
 		{
 			bHasSimulatedTargets = true;
 			break;

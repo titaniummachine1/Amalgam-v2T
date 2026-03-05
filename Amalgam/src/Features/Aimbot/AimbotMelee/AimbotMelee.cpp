@@ -732,11 +732,7 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 			else
 			{
 				const int iSmackTicks = TIME_TO_TICKS(std::max(pWeapon->m_flSmackTime() - I::GlobalVars->curtime, 0.f));
-				const int iElapsedTicks = std::max(I::GlobalVars->tickcount - m_iChargeStartTick, 0);
-				const int iSwingDelayTicks = std::max(GetSwingTime(pWeapon, false), 0);
-				const int iTrackedTicks = std::max(iSwingDelayTicks - iElapsedTicks, 0);
-				const bool bDoubletapActive = F::Ticks.GetTicks(pWeapon) > 0 || F::Ticks.m_bDoubletap;
-				const int iTicksToSmack = bDoubletapActive ? iSmackTicks : iTrackedTicks;
+				const int iTicksToSmack = iSmackTicks;
 				auto pNetChan = I::EngineClient->GetNetChannelInfo();
 				const int iOutLatencyTicks = pNetChan ? std::max(TIME_TO_TICKS(std::max(pNetChan->GetLatency(FLOW_OUTGOING), 0.f)), 0) : 0;
 				const int iChokeMargin = std::max(I::ClientState ? I::ClientState->chokedcommands : 0, 1);
@@ -812,8 +808,7 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 		if (it == m_mRecordMap.end() || it->second.empty())
 			continue;
 
-		auto tProbeTarget = tTarget;
-		if (CanHit(tProbeTarget, pLocal, pWeapon))
+		if (tTarget.m_pEntity->m_iTeamNum() != pLocal->m_iTeamNum())
 		{
 			bHasSimulatedTargets = true;
 			break;

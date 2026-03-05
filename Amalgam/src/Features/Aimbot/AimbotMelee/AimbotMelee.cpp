@@ -726,11 +726,14 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 				|| pLocal->m_flChargeMeter() < 100.f)
 			{
 				m_eChargeState = ChargeState::Idle;
+				m_iChargeStartTick = 0;
 				m_iChargeTarget = -1;
 			}
 			else
 			{
-				const int iTicksToSmack = TIME_TO_TICKS(std::max(pWeapon->m_flSmackTime() - I::GlobalVars->curtime, 0.f));
+				const int iElapsedTicks = std::max(I::GlobalVars->tickcount - m_iChargeStartTick, 0);
+				const int iSwingDelayTicks = std::max(GetSwingTime(pWeapon, false), 0);
+				const int iTicksToSmack = std::max(iSwingDelayTicks - iElapsedTicks, 0);
 				auto pNetChan = I::EngineClient->GetNetChannelInfo();
 				const int iOutLatencyTicks = pNetChan ? std::max(TIME_TO_TICKS(std::max(pNetChan->GetLatency(FLOW_OUTGOING), 0.f)), 0) : 0;
 				const int iChokeMargin = std::max(I::ClientState ? I::ClientState->chokedcommands : 0, 1);
@@ -745,12 +748,14 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 					else
 					{
 						m_eChargeState = ChargeState::Idle;
+						m_iChargeStartTick = 0;
 						m_iChargeTarget = -1;
 					}
 				}
 				else if (++m_iChargeTicks > 25)
 				{
 					m_eChargeState = ChargeState::Idle;
+					m_iChargeStartTick = 0;
 					m_iChargeTarget = -1;
 				}
 			}
@@ -759,6 +764,7 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 			pCmd->buttons |= IN_ATTACK2;
 			G::SendPacket = true;
 			m_eChargeState = ChargeState::Idle;
+			m_iChargeStartTick = 0;
 			m_iChargeTarget = -1;
 			break;
 		case ChargeState::Idle:
@@ -769,6 +775,7 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 	else if (pWeapon->m_flSmackTime() <= 0.f)
 	{
 		m_eChargeState = ChargeState::Idle;
+		m_iChargeStartTick = 0;
 		m_iChargeTarget = -1;
 	}
 
@@ -793,9 +800,21 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 		return;
 
 	auto vTargets = F::AimbotGlobal.ManageTargets(GetTargets, pLocal, pWeapon, Vars::Aimbot::General::TargetSelectionEnum::Distance);
-	const bool bHasCurrentTargets = !vTargets.empty();
+	UpdateInfo(pLocal, pWeapon, pCmd, vTargets);
+
+	bool bHasSimulatedTargets = false;
+	for (const auto& tTarget : vTargets)
+	{
+		auto it = m_mRecordMap.find(tTarget.m_pEntity->entindex());
+		if (it != m_mRecordMap.end() && !it->second.empty())
+		{
+			bHasSimulatedTargets = true;
+			break;
+		}
+	}
+
 	// Auto crit refill: check before target processing
-	if (Vars::Aimbot::Melee::CritRefill.Value && pWeapon->m_flSmackTime() < 0.f && !bHasCurrentTargets)
+	if (Vars::Aimbot::Melee::CritRefill.Value && pWeapon->m_flSmackTime() < 0.f && !bHasSimulatedTargets)
 	{
 		constexpr float flChargeReachDistance = 128.f;
 		const float flMinCombatReadyDistance = flChargeReachDistance * 2.f;
@@ -829,10 +848,25 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 	}
 	F::CritHack.m_bCritRefillActive = false;
 
+	auto ArmChargeTracking = [&](const Target_t& tTarget)
+	{
+		if ((pCmd->buttons & IN_ATTACK) && G::CanPrimaryAttack && pWeapon->m_flSmackTime() < 0.f
+			&& Vars::Aimbot::Melee::ChargeReach.Value
+			&& pLocal->m_iClass() == TF_CLASS_DEMOMAN
+			&& pLocal->m_flChargeMeter() >= 100.f
+			&& !pLocal->InCond(TF_COND_SHIELD_CHARGE)
+			&& m_eChargeState == ChargeState::Idle)
+		{
+			m_eChargeState = ChargeState::Tracking;
+			m_iChargeTicks = 0;
+			m_iChargeStartTick = I::GlobalVars->tickcount;
+			m_iChargeTarget = tTarget.m_pEntity->entindex();
+		}
+	};
+
 	//if (!G::AimTarget.m_iEntIndex)
 	//	G::AimTarget = { vTargets.front().m_pEntity->entindex(), I::GlobalVars->tickcount, 0 };
 
-	UpdateInfo(pLocal, pWeapon, pCmd, vTargets);
 	for (auto& tTarget : vTargets)
 	{
 		const auto iResult = CanHit(tTarget, pLocal, pWeapon);
@@ -841,6 +875,9 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 		{
 			G::AimTarget = { tTarget.m_pEntity->entindex(), I::GlobalVars->tickcount, 0 };
 			G::AimPoint = { tTarget.m_vPos, I::GlobalVars->tickcount };
+			if (Vars::Aimbot::General::AutoShoot.Value && pWeapon->m_flSmackTime() < 0.f && m_bShouldSwing)
+				pCmd->buttons |= IN_ATTACK;
+			ArmChargeTracking(tTarget);
 			Aim(pCmd, tTarget.m_vAngleTo);
 			break;
 		}
@@ -859,17 +896,7 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 		if (G::Attacking = SDK::IsAttacking(pLocal, pWeapon, pCmd, true))
 			F::Aimbot.m_eRanType = EWeaponType::MELEE;
 
-		if ((pCmd->buttons & IN_ATTACK) && G::CanPrimaryAttack && pWeapon->m_flSmackTime() < 0.f
-			&& Vars::Aimbot::Melee::ChargeReach.Value &&
-			pLocal->m_iClass() == TF_CLASS_DEMOMAN &&
-			pLocal->m_flChargeMeter() >= 100.f &&
-			!pLocal->InCond(TF_COND_SHIELD_CHARGE) &&
-			m_eChargeState == ChargeState::Idle)
-		{
-			m_eChargeState = ChargeState::Tracking;
-			m_iChargeTicks = 0;
-			m_iChargeTarget = tTarget.m_pEntity->entindex();
-		}
+		ArmChargeTracking(tTarget);
 
 		if (G::Attacking == 1)
 		{

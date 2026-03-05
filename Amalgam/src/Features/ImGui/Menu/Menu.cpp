@@ -323,11 +323,7 @@ void CMenu::MenuAimbot(int iTab)
 						FSlider(Vars::Aimbot::General::IgnoreInvisible, FSliderEnum::Left);
 					}
 					PopTransparent();
-					PushTransparent(!(Vars::Aimbot::General::Ignore.Value & Vars::Aimbot::General::IgnoreEnum::Unsimulated));
-					{
-						FSlider(Vars::Aimbot::General::TickTolerance, FSliderEnum::Right);
-					}
-					PopTransparent();
+
 					PushTransparent(!Vars::Aimbot::General::FOVCircle.Value);
 					{
 						FColorPicker(Vars::Colors::FOVCircle);
@@ -524,6 +520,11 @@ void CMenu::MenuAimbot(int iTab)
 					FToggle(Vars::Aimbot::Melee::AutoBackstab, FToggleEnum::Left);
 					FToggle(Vars::Aimbot::Melee::IgnoreRazorback, FToggleEnum::Right);
 					FToggle(Vars::Aimbot::Melee::SwingPrediction, FToggleEnum::Left);
+					PushTransparent(!Vars::Aimbot::Melee::SwingPrediction.Value);
+					{
+						FSlider(Vars::Aimbot::General::TickTolerance, FSliderEnum::Right);
+					}
+					PopTransparent();
 					FToggle(Vars::Aimbot::Melee::WhipTeam, FToggleEnum::Right);
 					FToggle(Vars::CritHack::AlwaysMeleeCrit, FToggleEnum::Left);
 					FToggle(Vars::Aimbot::Melee::ChargeReach, FToggleEnum::Right);

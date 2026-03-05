@@ -798,51 +798,59 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 	if (RunSapper(pLocal, pWeapon, pCmd))
 		return;
 
-	auto vTargets = F::AimbotGlobal.ManageTargets(GetTargets, pLocal, pWeapon, Vars::Aimbot::General::TargetSelectionEnum::Distance);
-	UpdateInfo(pLocal, pWeapon, pCmd, vTargets);
-
-	bool bHasSimulatedTargets = false;
-	for (const auto& tTarget : vTargets)
-	{
-		auto it = m_mRecordMap.find(tTarget.m_pEntity->entindex());
-		if (it == m_mRecordMap.end() || it->second.empty())
-			continue;
-
-		if (tTarget.m_pEntity->m_iTeamNum() != pLocal->m_iTeamNum())
-		{
-			bHasSimulatedTargets = true;
-			break;
-		}
-	}
-
 	// Auto crit refill: check before target processing
-	if (Vars::Aimbot::Melee::CritRefill.Value && pWeapon->m_flSmackTime() < 0.f && !bHasSimulatedTargets)
+	if (Vars::Aimbot::Melee::CritRefill.Value && pWeapon->m_flSmackTime() < 0.f)
 	{
-		constexpr float flChargeReachDistance = 128.f;
-		const float flMinCombatReadyDistance = flChargeReachDistance * 2.f;
-		float flClosestEnemyDistance = FLT_MAX;
-
+		// Check if any enemy has simulation records (combat)
+		bool bHasSimulatedTargets = false;
 		for (auto pEntity : H::Entities.GetGroup(EntityEnum::PlayerEnemy))
 		{
-			auto pPlayer = pEntity->As<CTFPlayer>();
-			if (!pPlayer || !pPlayer->IsAlive() || pEntity->IsDormant())
+			if (!pEntity || !pEntity->IsAlive() || pEntity->IsDormant())
 				continue;
-
-			flClosestEnemyDistance = std::min(flClosestEnemyDistance, pLocal->GetAbsOrigin().DistTo(pEntity->GetAbsOrigin()));
+			auto it = m_mRecordMap.find(pEntity->entindex());
+			if (it != m_mRecordMap.end() && !it->second.empty())
+			{
+				bHasSimulatedTargets = true;
+				break;
+			}
 		}
 
-		const bool bSafeToRefill = flClosestEnemyDistance > flMinCombatReadyDistance;
-		if (bSafeToRefill && F::CritHack.GetAvailableCrits() < Vars::Aimbot::Melee::CritRefillAmount.Value && G::CanPrimaryAttack)
+		if (bHasSimulatedTargets)
 		{
-			F::CritHack.m_bCritRefillActive = true;
-			pCmd->buttons |= IN_ATTACK;
-			return;
+			F::CritHack.m_bCritRefillActive = false;
+			// proceed to normal targeting
 		}
 		else
-			F::CritHack.m_bCritRefillActive = false;
+		{
+			constexpr float flChargeReachDistance = 128.f;
+			const float flMinCombatReadyDistance = flChargeReachDistance * 2.f;
+			float flClosestEnemyDistance = FLT_MAX;
+
+			for (auto pEntity : H::Entities.GetGroup(EntityEnum::PlayerEnemy))
+			{
+				auto pPlayer = pEntity->As<CTFPlayer>();
+				if (!pPlayer || !pPlayer->IsAlive() || pEntity->IsDormant())
+					continue;
+
+				flClosestEnemyDistance = std::min(flClosestEnemyDistance, pLocal->GetAbsOrigin().DistTo(pEntity->GetAbsOrigin()));
+			}
+
+			const bool bSafeToRefill = flClosestEnemyDistance > flMinCombatReadyDistance;
+			if (bSafeToRefill && F::CritHack.GetAvailableCrits() < Vars::Aimbot::Melee::CritRefillAmount.Value && G::CanPrimaryAttack)
+			{
+				F::CritHack.m_bCritRefillActive = true;
+				pCmd->buttons |= IN_ATTACK;
+				return;
+			}
+			else
+				F::CritHack.m_bCritRefillActive = false;
+		}
 	}
 	else
 		F::CritHack.m_bCritRefillActive = false;
+
+	auto vTargets = F::AimbotGlobal.ManageTargets(GetTargets, pLocal, pWeapon, Vars::Aimbot::General::TargetSelectionEnum::Distance);
+	UpdateInfo(pLocal, pWeapon, pCmd, vTargets);
 
 	if (vTargets.empty())
 	{

@@ -444,12 +444,31 @@ int CAimbotMelee::CanHit(Target_t& tTarget, CTFPlayer* pLocal, CTFWeaponBase* pW
 		Vec3 vRestoreMaxs = tTarget.m_pEntity->m_vecMaxs();
 
 		tTarget.m_pEntity->SetAbsOrigin(pRecord->m_vOrigin);
-		tTarget.m_pEntity->m_vecMins() = pRecord->m_vMins + PLAYER_ORIGIN_COMPRESSION; // account for origin compression
-		tTarget.m_pEntity->m_vecMaxs() = pRecord->m_vMaxs - PLAYER_ORIGIN_COMPRESSION;
+		if (tTarget.m_pEntity->IsPlayer())
+		{
+			tTarget.m_pEntity->m_vecMins() = pRecord->m_vMins + PLAYER_ORIGIN_COMPRESSION; // account for player origin compression
+			tTarget.m_pEntity->m_vecMaxs() = pRecord->m_vMaxs - PLAYER_ORIGIN_COMPRESSION;
+		}
+		else
+		{
+			tTarget.m_pEntity->m_vecMins() = pRecord->m_vMins;
+			tTarget.m_pEntity->m_vecMaxs() = pRecord->m_vMaxs;
+		}
+
+		if (tTarget.m_pEntity->m_vecMins().x > tTarget.m_pEntity->m_vecMaxs().x
+			|| tTarget.m_pEntity->m_vecMins().y > tTarget.m_pEntity->m_vecMaxs().y
+			|| tTarget.m_pEntity->m_vecMins().z > tTarget.m_pEntity->m_vecMaxs().z)
+		{
+			tTarget.m_pEntity->SetAbsOrigin(vRestoreOrigin);
+			tTarget.m_pEntity->m_vecMins() = vRestoreMins;
+			tTarget.m_pEntity->m_vecMaxs() = vRestoreMaxs;
+			continue;
+		}
 
 		Vec3 vDiff = { 0, 0, std::clamp(m_vEyePos.z - pRecord->m_vOrigin.z, pRecord->m_vMins.z, pRecord->m_vMaxs.z) };
 		tTarget.m_vPos = pRecord->m_vOrigin + vDiff;
-		Aim(G::CurrentUserCmd->viewangles, Math::CalcAngle(m_vEyePos, tTarget.m_vPos), tTarget.m_vAngleTo);
+		const Vec3 vViewAngles = G::CurrentUserCmd ? G::CurrentUserCmd->viewangles : I::EngineClient->GetViewAngles();
+		Aim(vViewAngles, Math::CalcAngle(m_vEyePos, tTarget.m_vPos), tTarget.m_vAngleTo);
 
 		Vec3 vForward; Math::AngleVectors(tTarget.m_vAngleTo, &vForward);
 		Vec3 vTraceEnd = m_vEyePos + (vForward * flRange);
@@ -742,15 +761,7 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 
 				if (iTicksToSmack <= iChargeWindow)
 				{
-					auto pTarget = I::ClientEntityList->GetClientEntity(m_iChargeTarget);
-					auto pTargetBase = pTarget ? pTarget->As<CBaseEntity>() : nullptr;
-					if (ShouldCommitChargeReach(pLocal, pWeapon, pCmd, pTargetBase, iTicksToSmack))
-						m_eChargeState = ChargeState::Charge;
-					else
-					{
-						m_eChargeState = ChargeState::Idle;
-						m_iChargeTarget = -1;
-					}
+					m_eChargeState = ChargeState::Charge;
 				}
 				else if (++m_iChargeTicks > 25)
 				{

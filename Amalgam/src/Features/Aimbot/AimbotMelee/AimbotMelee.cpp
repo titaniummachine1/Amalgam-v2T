@@ -805,7 +805,8 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 		bool bHasSimulatedTargets = false;
 		for (auto pEntity : H::Entities.GetGroup(EntityEnum::PlayerEnemy))
 		{
-			if (!pEntity || !pEntity->IsAlive() || pEntity->IsDormant())
+			auto pPlayer = pEntity ? pEntity->As<CTFPlayer>() : nullptr;
+			if (!pPlayer || !pPlayer->IsAlive() || pEntity->IsDormant())
 				continue;
 			auto it = m_mRecordMap.find(pEntity->entindex());
 			if (it != m_mRecordMap.end() && !it->second.empty())

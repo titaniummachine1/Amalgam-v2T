@@ -295,7 +295,6 @@ void CCritHack::Reset()
 }
 
 
-
 int CCritHack::GetCritRequest(CUserCmd* pCmd, CTFWeaponBase* pWeapon)
 {
 	bool bCanCrit = m_iAvailableCrits > 0 && !m_bCritBanned;
@@ -309,7 +308,9 @@ int CCritHack::GetCritRequest(CUserCmd* pCmd, CTFWeaponBase* pWeapon)
 			bPressed = true;
 	}
 
-	bool bSkip = Vars::CritHack::AvoidRandomCrits.Value || m_bCritRefillActive;
+	const bool bRefillActive = m_bCritRefillActive;
+	m_bCritRefillActive = false;
+	bool bSkip = Vars::CritHack::AvoidRandomCrits.Value || bRefillActive;
 	bool bDesync = CommandToSeed(pCmd->command_number) == pWeapon->m_iCurrentSeed();
 
 	return bCanCrit && bPressed ? CritRequestEnum::Crit : bSkip || bDesync ? CritRequestEnum::Skip : CritRequestEnum::Any;
@@ -390,7 +391,9 @@ int CCritHack::PredictCmdNum(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd
 			if (pWeapon->IsRapidFire() && I::GlobalVars->curtime < pWeapon->m_flLastRapidFireCritCheckTime() + 1.f)
 				return iCommandNumber;
 
+			const bool bRefillActive = m_bCritRefillActive;
 			int iRequest = GetCritRequest(pCmd, pWeapon);
+			m_bCritRefillActive = bRefillActive;
 			if (iRequest == CritRequestEnum::Any)
 				return iCommandNumber;
 

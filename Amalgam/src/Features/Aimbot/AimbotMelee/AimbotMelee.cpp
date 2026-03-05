@@ -742,15 +742,7 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 
 				if (iTicksToSmack <= iChargeWindow)
 				{
-					auto pTarget = I::ClientEntityList->GetClientEntity(m_iChargeTarget);
-					auto pTargetBase = pTarget ? pTarget->As<CBaseEntity>() : nullptr;
-					if (ShouldCommitChargeReach(pLocal, pWeapon, pCmd, pTargetBase, iTicksToSmack))
-						m_eChargeState = ChargeState::Charge;
-					else
-					{
-						m_eChargeState = ChargeState::Idle;
-						m_iChargeTarget = -1;
-					}
+					m_eChargeState = ChargeState::Charge;
 				}
 				else if (++m_iChargeTicks > 25)
 				{

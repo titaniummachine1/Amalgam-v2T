@@ -11,9 +11,12 @@ static inline bool AntiAimCheck(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUser
 
 void CPacketManip::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 {
-	F::FakeAngle.bDrawChams = Vars::Fakelag::Fakelag.Value || F::AntiAim.AntiAimOn();
+	F::FakeAngle.bDrawChams = Vars::Fakelag::Fakelag.Value || F::AntiAim.AntiAimOn() || F::BufferManipulator.OwnsChoke();
 
 	G::SendPacket = true;
+	if (F::BufferManipulator.Run(pLocal, pWeapon, pCmd))
+		return;
+
 	F::FakeLag.Run(pLocal, pWeapon, pCmd);
 	if (AntiAimCheck(pLocal, pWeapon, pCmd))
 		G::SendPacket = false;

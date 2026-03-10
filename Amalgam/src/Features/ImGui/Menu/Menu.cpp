@@ -1318,6 +1318,16 @@ void CMenu::MenuHvH(int iTab)
 					FToggle(Vars::Fakelag::UnchokeOnAttack, FToggleEnum::Left);
 					FToggle(Vars::Fakelag::RetainBlastJump, FToggleEnum::Right);
 				} EndSection();
+				if (Section("Buffer Manipulator"))
+				{
+					FToggle(Vars::BufferManipulator::Enabled, FToggleEnum::Left);
+					FToggle(Vars::BufferManipulator::TriggerOnSwing, FToggleEnum::Right);
+					PushTransparent(!Vars::BufferManipulator::Enabled.Value);
+					{
+						FSlider(Vars::BufferManipulator::BufferTicks, FSliderEnum::Left);
+					}
+					PopTransparent();
+				} EndSection();
 				if (Vars::Debug::Options.Value)
 				{
 					if (Section("##Debug"))

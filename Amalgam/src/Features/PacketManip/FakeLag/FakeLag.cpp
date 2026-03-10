@@ -19,9 +19,14 @@ bool CFakeLag::IsAllowed(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pC
 		|| F::Ticks.m_iShiftedGoal != F::Ticks.m_iShiftedTicks || F::Ticks.m_bRecharge)
 		return false;
 
+	const bool bBeggarsPressStarted = pWeapon
+		&& pWeapon->m_iItemDefinitionIndex() == Soldier_m_TheBeggarsBazooka
+		&& pCmd->buttons & IN_ATTACK
+		&& (!G::LastUserCmd || !(G::LastUserCmd->buttons & IN_ATTACK));
+
 	if (G::Attacking == 1 && Vars::Fakelag::UnchokeOnAttack.Value || F::AutoRocketJump.IsRunning()
 		|| Vars::Fakelag::Options.Value & Vars::Fakelag::OptionsEnum::NotAirborne && !pLocal->m_hGroundEntity()
-		|| pWeapon && pWeapon->m_iItemDefinitionIndex() == Soldier_m_TheBeggarsBazooka && pCmd->buttons & IN_ATTACK && !(G::LastUserCmd->buttons & IN_ATTACK)) // try to prevent issues
+		|| bBeggarsPressStarted)
 		return false;
 
 	if (m_bUnducking)
@@ -102,6 +107,7 @@ void CFakeLag::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 	{
 		m_iGoal = 0;
 		m_vLastPosition = pLocal->m_vecOrigin();
+
 		return;
 	}
 

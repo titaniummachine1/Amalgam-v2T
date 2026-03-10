@@ -1,5 +1,6 @@
 #pragma once
 #include "../../SDK/SDK.h"
+#include "BufferManipulator/BufferManipulator.h"
 #include "FakeLag/FakeLag.h"
 #include "AntiAim/AntiAim.h"
 

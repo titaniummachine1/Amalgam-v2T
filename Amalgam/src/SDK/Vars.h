@@ -514,6 +514,12 @@ NAMESPACE_BEGIN(Vars)
 		CVar(RetainSoldierOnly, "Retain blastjump soldier only", true, NOSAVE | DEBUGVAR);
 	NAMESPACE_END(Fakelag)
 
+	NAMESPACE_BEGIN(BufferManipulator, Buffer Manipulator)
+		CVar(Enabled, VA_LIST("Enabled", "Buffer manipulator enabled"), false);
+		CVar(TriggerOnSwing, "Trigger on swing", false);
+		CVar(BufferTicks, "Buffer ticks", 12, SLIDER_CLAMP, 1, 22);
+	NAMESPACE_END(BufferManipulator)
+
 	NAMESPACE_BEGIN(AutoPeek, Auto Peek)
 		CVar(Enabled, VA_LIST("Enabled", "Auto peek"), false);
 	NAMESPACE_END(AutoPeek)

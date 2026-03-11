@@ -7,6 +7,7 @@
 #include "AutoAirblast/AutoAirblast.h"
 #include "AutoHeal/AutoHeal.h"
 #include "AutoRocketJump/AutoRocketJump.h"
+#include "Triggerbot/Triggerbot.h"
 #include "../Misc/Misc.h"
 #include "../Visuals/Visuals.h"
 
@@ -105,8 +106,7 @@ void CAimbot::RunMain(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 	if (!ShouldRun(pLocal, pWeapon))
 		return;
 
-	F::AutoDetonate.Run(pLocal, pCmd);
-	F::AutoAirblast.Run(pLocal, pWeapon, pCmd);
+	F::AimbotTriggerbot.Run(pLocal, pWeapon, pCmd);
 	F::AutoHeal.Run(pLocal, pWeapon, pCmd);
 
 	RunAimbot(pLocal, pWeapon, pCmd);

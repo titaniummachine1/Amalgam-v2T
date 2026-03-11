@@ -1,6 +1,7 @@
 #include "AimbotMelee.h"
 
 #include "../Aimbot.h"
+#include "../Triggerbot/Triggerbot.h"
 #include "../../CritHack/CritHack.h"
 #include "../../Simulation/MovementSimulation/MovementSimulation.h"
 #include "../../EnginePrediction/EnginePrediction.h"
@@ -173,6 +174,15 @@ static inline std::vector<Target_t> GetTargets(CTFPlayer* pLocal, CTFWeaponBase*
 	return vTargets;
 }
 
+static int GetLegalBufferTicks()
+{
+	const int iRequestedTicks = std::clamp(Vars::BufferManipulator::BufferTicks.Value, 1, 22);
+	static auto sv_maxunlag = H::ConVars.FindVar("sv_maxunlag");
+	const float flMaxUnlag = sv_maxunlag ? std::max(sv_maxunlag->GetFloat(), 0.f) : 0.2f;
+	const int iMaxUnlagTicks = std::max(TIME_TO_TICKS(flMaxUnlag), 1);
+	return std::clamp(iRequestedTicks, 1, iMaxUnlagTicks);
+}
+
 
 int CAimbotMelee::GetSwingTime(CTFWeaponBase* pWeapon, bool bVar)
 {
@@ -274,7 +284,7 @@ void CAimbotMelee::UpdateInfo(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCm
 			for (auto& [iIndex, tStorage] : mStorage)
 				m_mPaths[iIndex] = tStorage.m_vPath;
 
-			const bool bAlwaysDraw = !Vars::Aimbot::General::AutoShoot.Value || Vars::Debug::Info.Value;
+			const bool bAlwaysDraw = m_bForceSwingVisualization || !Vars::Aimbot::General::AutoShoot.Value || Vars::Debug::Info.Value;
 			if (bAlwaysDraw)
 			{
 				G::LineStorage.clear();
@@ -312,7 +322,7 @@ bool CAimbotMelee::CanBackstab(CBaseEntity* pTarget, CTFPlayer* pLocal, Vec3 vEy
 	if (!pTarget->IsPlayer() || pTarget->m_iTeamNum() == pLocal->m_iTeamNum())
 		return false;
 
-	if (Vars::Aimbot::Melee::IgnoreRazorback.Value)
+	if (Vars::Aimbot::Triggerbot::IgnoreRazorback.Value)
 	{
 		CUtlVector<CBaseEntity*> itemList;
 		int iBackstabShield = SDK::AttribHookValue(0, "set_blockbackstab_once", pTarget, &itemList);
@@ -394,7 +404,7 @@ bool CAimbotMelee::CanBackstab(CBaseEntity* pTarget, CTFPlayer* pLocal, Vec3 vEy
 	return true;
 }
 
-int CAimbotMelee::CanHit(Target_t& tTarget, CTFPlayer* pLocal, CTFWeaponBase* pWeapon)
+int CAimbotMelee::CanHit(Target_t& tTarget, CTFPlayer* pLocal, CTFWeaponBase* pWeapon, const Vec3* pViewAngles, bool bUseViewAnglesForBackstab)
 {
 	if (Vars::Aimbot::General::Ignore.Value & Vars::Aimbot::General::IgnoreEnum::Unsimulated && H::Entities.GetChoke(tTarget.m_pEntity->entindex()) > Vars::Aimbot::General::TickTolerance.Value)
 		return false;
@@ -469,7 +479,7 @@ int CAimbotMelee::CanHit(Target_t& tTarget, CTFPlayer* pLocal, CTFWeaponBase* pW
 
 		Vec3 vDiff = { 0, 0, std::clamp(m_vEyePos.z - pRecord->m_vOrigin.z, pRecord->m_vMins.z, pRecord->m_vMaxs.z) };
 		tTarget.m_vPos = pRecord->m_vOrigin + vDiff;
-		const Vec3 vViewAngles = G::CurrentUserCmd ? G::CurrentUserCmd->viewangles : I::EngineClient->GetViewAngles();
+		const Vec3 vViewAngles = pViewAngles ? *pViewAngles : G::CurrentUserCmd ? G::CurrentUserCmd->viewangles : I::EngineClient->GetViewAngles();
 		Aim(vViewAngles, Math::CalcAngle(m_vEyePos, tTarget.m_vPos), tTarget.m_vAngleTo);
 
 		Vec3 vForward; Math::AngleVectors(tTarget.m_vAngleTo, &vForward);
@@ -483,8 +493,8 @@ int CAimbotMelee::CanHit(Target_t& tTarget, CTFPlayer* pLocal, CTFWeaponBase* pW
 			bReturn = trace.m_pEnt && trace.m_pEnt == tTarget.m_pEntity;
 		}
 
-		if (bReturn && Vars::Aimbot::Melee::AutoBackstab.Value && pWeapon->GetWeaponID() == TF_WEAPON_KNIFE)
-			bReturn = CanBackstab(tTarget.m_pEntity, pLocal, tTarget.m_vAngleTo);
+		if (bReturn && pWeapon->GetWeaponID() == TF_WEAPON_KNIFE)
+			bReturn = CanBackstab(tTarget.m_pEntity, pLocal, bUseViewAnglesForBackstab && pViewAngles ? *pViewAngles : tTarget.m_vAngleTo);
 
 		tTarget.m_pEntity->SetAbsOrigin(vRestoreOrigin);
 		tTarget.m_pEntity->m_vecMins() = vRestoreMins;
@@ -737,8 +747,60 @@ static inline void DrawVisuals(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserC
 	}
 }
 
+bool CAimbotMelee::RunTriggerbotBackstab(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
+{
+	if (!Triggerbot::AllowAutoBackstab() || pWeapon->GetWeaponID() != TF_WEAPON_KNIFE)
+		return false;
+
+	auto vTargets = F::AimbotGlobal.ManageTargets(GetTargets, pLocal, pWeapon, Vars::Aimbot::General::TargetSelectionEnum::Distance);
+	if (vTargets.empty())
+		return false;
+
+	m_bForceSwingVisualization = false;
+	UpdateInfo(pLocal, pWeapon, pCmd, vTargets);
+
+	const bool bAimBackstab = Vars::Aimbot::Triggerbot::BackstabAimMode.Value == Vars::Aimbot::Triggerbot::BackstabAimModeEnum::Aim;
+	const Vec3 vViewAngles = pCmd->viewangles;
+	const int iAimMethod = Vars::Aimbot::General::AimType.Value ? Vars::Aimbot::General::AimType.Value : Vars::Aimbot::General::AimTypeEnum::Plain;
+
+	for (auto& tTarget : vTargets)
+	{
+		const float flFOVTo = Math::CalcFov(vViewAngles, tTarget.m_vAngleTo);
+		if (flFOVTo > Vars::Aimbot::Triggerbot::BackstabFOV.Value)
+			continue;
+
+		const auto iResult = bAimBackstab ? CanHit(tTarget, pLocal, pWeapon) : CanHit(tTarget, pLocal, pWeapon, &vViewAngles, true);
+		if (iResult != 1)
+			continue;
+
+		G::AimTarget = { tTarget.m_pEntity->entindex(), I::GlobalVars->tickcount };
+		G::AimPoint = { tTarget.m_vPos, I::GlobalVars->tickcount };
+
+		if (pWeapon->m_flSmackTime() < 0.f && m_bShouldSwing)
+			pCmd->buttons |= IN_ATTACK;
+
+		G::Attacking = SDK::IsAttacking(pLocal, pWeapon, pCmd, true);
+		if (G::Attacking == 1)
+		{
+			F::Aimbot.m_eRanType = EWeaponType::MELEE;
+			if (tTarget.m_bBacktrack)
+				pCmd->tick_count = TIME_TO_TICKS(tTarget.m_pRecord->m_flSimTime + F::Backtrack.GetFakeInterp());
+		}
+
+		if (bAimBackstab)
+			Aim(pCmd, tTarget.m_vAngleTo, iAimMethod);
+
+		return true;
+	}
+
+	return false;
+}
+
 void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 {
+	if (pWeapon->GetWeaponID() == TF_WEAPON_KNIFE && Triggerbot::AllowAutoBackstab())
+		return;
+
 	// Charge reach follow-up: fires IN_ATTACK2 at the right moment (1-2 tick window before smack)
 	// Runs before all early returns so charge can still execute if target leaves normal melee range mid-swing
 	if (pLocal->m_iClass() == TF_CLASS_DEMOMAN && pWeapon->m_flSmackTime() > 0.f)
@@ -805,6 +867,7 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 
 	m_mRecordMap.clear(); m_mPaths.clear();
 	m_iDoubletapTicks = F::Ticks.GetTicks(pWeapon);
+	m_bForceSwingVisualization = false;
 
 	if (RunSapper(pLocal, pWeapon, pCmd))
 		return;
@@ -850,28 +913,31 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 	const int iSwingTicks = std::max(GetSwingTime(pWeapon, false), 0);
 	const bool bSwingSession = F::BufferManipulator.GetTrigger() == CBufferManipulator::SessionTrigger::Swing
 		&& (F::BufferManipulator.IsActive() || F::BufferManipulator.IsPendingStart());
-	const int iBufferGoal = std::clamp(Vars::BufferManipulator::BufferTicks.Value, 1, 22);
+	const int iBufferGoal = GetLegalBufferTicks();
 	const int iBufferedTicks = F::BufferManipulator.IsActive() ? std::max(pCmd->command_number - F::BufferManipulator.GetStartCommand(), 0) : 0;
 	const bool bFinalizeSwingBuffer = bUseSwingBuffer && F::BufferManipulator.IsActive()
 		&& (iBufferedTicks >= std::max(iSwingTicks - 1, 0) || iBufferedTicks + 1 >= iBufferGoal);
 
 	if (vTargets.empty())
 	{
-		if (bUseSwingBuffer && bSwingSession)
+		if (bUseSwingBuffer && bFinalizeSwingBuffer)
 			F::BufferManipulator.CancelSession();
+		else if (bUseSwingBuffer && bSwingSession)
+			pCmd->buttons &= ~IN_ATTACK;
 		return;
 	}
 
 	auto FinalizeSwingBuffer = [&]()
 	{
 		if (!F::BufferManipulator.IsActive())
-			return false;
+			return 0;
 
 		const int iStartCommand = F::BufferManipulator.GetStartCommand();
 		if (iStartCommand <= 0)
-			return false;
+			return 0;
 
 		const int iMaxOffset = std::max(pCmd->command_number - iStartCommand, 0);
+		m_bForceSwingVisualization = true;
 		for (int iOffset = 0; iOffset <= iMaxOffset; iOffset++)
 		{
 			auto vBufferedTargets = vTargets;
@@ -880,13 +946,18 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 			{
 				if (!CanHit(tBufferedTarget, pLocal, pWeapon))
 					continue;
+				SDK::Output("BufferManipulator", std::format("Buffered melee finalize shift: {} tick(s)", iOffset).c_str(), Vars::Menu::Theme::Accent.Value, OUTPUT_CONSOLE | OUTPUT_DEBUG);
 				UpdateInfo(pLocal, pWeapon, pCmd, vTargets);
-				return F::BufferManipulator.SetAttackCommand(iStartCommand + iOffset, true);
+				m_bForceSwingVisualization = false;
+				F::BufferManipulator.SetAttackCommand(iStartCommand + iOffset, true);
+				return iOffset;
 			}
 		}
 
+		SDK::Output("BufferManipulator", std::format("Buffered melee finalize shift: no valid buffered tick in {} buffered tick(s), canceling", iMaxOffset + 1).c_str(), Vars::Menu::Theme::Accent.Value, OUTPUT_CONSOLE | OUTPUT_DEBUG);
 		UpdateInfo(pLocal, pWeapon, pCmd, vTargets);
-		return false;
+		m_bForceSwingVisualization = false;
+		return -1;
 	};
 
 	auto ArmChargeTracking = [&](const Target_t& tTarget)
@@ -921,16 +992,17 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 			{
 				if (bUseSwingBuffer)
 				{
-					if (!bSwingSession)
+					const bool bStartedSwingSession = !bSwingSession;
+					if (bStartedSwingSession)
 						F::BufferManipulator.RequestSession(CBufferManipulator::SessionTrigger::Swing, pCmd);
 					else if (bFinalizeSwingBuffer)
 					{
-						if (FinalizeSwingBuffer())
-							F::BufferManipulator.ReleaseSession();
-						else
-							F::BufferManipulator.CancelSession();
+						FinalizeSwingBuffer();
+						F::BufferManipulator.ReleaseSession();
 					}
 					pCmd->buttons &= ~IN_ATTACK;
+					if (bStartedSwingSession && F::BufferManipulator.IsActive())
+						F::BufferManipulator.SetAttackCommand(F::BufferManipulator.GetStartCommand(), true);
 				}
 				else
 					pCmd->buttons |= IN_ATTACK;
@@ -949,16 +1021,17 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 			{
 				if (bUseSwingBuffer)
 				{
-					if (!bSwingSession)
+					const bool bStartedSwingSession = !bSwingSession;
+					if (bStartedSwingSession)
 						F::BufferManipulator.RequestSession(CBufferManipulator::SessionTrigger::Swing, pCmd);
 					else if (bFinalizeSwingBuffer)
 					{
-						if (FinalizeSwingBuffer())
-							F::BufferManipulator.ReleaseSession();
-						else
-							F::BufferManipulator.CancelSession();
+						FinalizeSwingBuffer();
+						F::BufferManipulator.ReleaseSession();
 					}
 					pCmd->buttons &= ~IN_ATTACK;
+					if (bStartedSwingSession && F::BufferManipulator.IsActive())
+						F::BufferManipulator.SetAttackCommand(F::BufferManipulator.GetStartCommand(), true);
 				}
 				else
 					pCmd->buttons |= IN_ATTACK;
@@ -992,8 +1065,13 @@ void CAimbotMelee::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd
 	if (bUseSwingBuffer && bSwingSession && !bFoundBufferedTarget)
 	{
 		pCmd->buttons &= ~IN_ATTACK;
-		if (bFinalizeSwingBuffer && !FinalizeSwingBuffer())
-			F::BufferManipulator.CancelSession();
+		if (bFinalizeSwingBuffer)
+		{
+			if (FinalizeSwingBuffer() >= 0)
+				F::BufferManipulator.ReleaseSession();
+			else
+				F::BufferManipulator.CancelSession();
+		}
 	}
 }
 
@@ -1036,6 +1114,9 @@ bool CAimbotMelee::FindNearestBuildPoint(CBaseObject* pBuilding, CTFPlayer* pLoc
 
 bool CAimbotMelee::RunSapper(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
 {
+	if (!Triggerbot::AllowAutoSapper())
+		return false;
+
 	if (pWeapon->GetWeaponID() != TF_WEAPON_BUILDER)
 		return false;
 
@@ -1071,11 +1152,9 @@ bool CAimbotMelee::RunSapper(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd
 
 	auto& tTarget = vTargets.front();
 
+	pCmd->buttons |= IN_ATTACK;
+
 	bool bShouldAim = true;
-	if (Vars::Aimbot::General::AutoShoot.Value)
-		pCmd->buttons |= IN_ATTACK;
-	else
-		bShouldAim = pCmd->buttons & IN_ATTACK;
 	if (Vars::Aimbot::General::AimType.Value == Vars::Aimbot::General::AimTypeEnum::Silent)
 		bShouldAim = bShouldAim && !I::ClientState->chokedcommands && F::Ticks.CanChoke(true);
 

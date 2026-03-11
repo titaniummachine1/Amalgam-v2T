@@ -233,7 +233,7 @@ void CMenu::DrawMenu()
 		PushFont(F::Render.FontBold);
 		FTabs(
 			{
-				{ "AIMBOT", "GENERAL" },
+				{ "AIMBOT", "GENERAL", "TRIGGERBOT" },
 				{ "VISUALS", "ESP", "AIMDRAW", "MISC##", "MENU" },
 				{ "HVH", "MAIN" },
 				{ "MISC", "MAIN", "BOT"},
@@ -317,11 +317,11 @@ void CMenu::MenuAimbot(int iTab)
 					FSlider(Vars::Aimbot::General::AimFOV, FSliderEnum::Left);
 					FSlider(Vars::Aimbot::General::MaxTargets, FSliderEnum::Right);
 					FSlider(Vars::Aimbot::General::SmoothCurveAmount, FSliderEnum::Left);
-					FSlider(Vars::Aimbot::General::TickTolerance, FSliderEnum::Right);
 					FSlider(Vars::Aimbot::General::AssistStrength, FSliderEnum::Right);
+					FSlider(Vars::Aimbot::General::TickTolerance, FSliderEnum::Left);
 					PushTransparent(!(Vars::Aimbot::General::Ignore.Value & Vars::Aimbot::General::IgnoreEnum::Invisible));
 					{
-						FSlider(Vars::Aimbot::General::IgnoreInvisible, FSliderEnum::Left);
+						FSlider(Vars::Aimbot::General::IgnoreInvisible, FSliderEnum::Right);
 					}
 					PopTransparent();
 
@@ -391,10 +391,6 @@ void CMenu::MenuAimbot(int iTab)
 						FSlider(Vars::Aimbot::Projectile::HitChance, FSliderEnum::Right);
 					}
 					PopTransparent();
-					FDropdown(Vars::Aimbot::Projectile::AutoDetonate, FDropdownEnum::Left);
-					FDropdown(Vars::Aimbot::Projectile::AutoAirblast, FDropdownEnum::Right);
-					FSlider(Vars::Aimbot::Projectile::AutodetRadius, FSliderEnum::Left);
-					FSlider(Vars::Aimbot::Projectile::SplashRadius, FSliderEnum::Right);
 					PushTransparent(!Vars::Aimbot::Projectile::AutoRelease.Value);
 					{
 						FSlider(Vars::Aimbot::Projectile::AutoRelease);
@@ -496,9 +492,6 @@ void CMenu::MenuAimbot(int iTab)
 					FToggle(Vars::Aimbot::Healing::AutoHeal, FToggleEnum::Left);
 					FToggle(Vars::Aimbot::Healing::AutoArrow, FToggleEnum::Right);
 					FToggle(Vars::Aimbot::Healing::AutoSandvich, FToggleEnum::Left);
-					FToggle(Vars::Aimbot::Healing::AutoVaccinator, FToggleEnum::Right);
-					FToggle(Vars::Aimbot::Healing::ActivateOnVoice, FToggleEnum::Left);
-					FSlider(Vars::Aimbot::Healing::ActivationHealthPercent, FSliderEnum::Right, Vars::Aimbot::Healing::ActivationHealthPercent[DEFAULT_BIND] <= 0.f ? "Off" : "%g%%");
 					PushTransparent(!Vars::Aimbot::Healing::AutoArrow.Value);
 					{
 						FToggleSlider(Vars::Aimbot::Healing::AutoSwitch, Vars::Aimbot::Healing::AutoSwitchHealth);
@@ -518,8 +511,6 @@ void CMenu::MenuAimbot(int iTab)
 				}
 				if (Section("Melee", 8))
 				{
-					FToggle(Vars::Aimbot::Melee::AutoBackstab, FToggleEnum::Left);
-					FToggle(Vars::Aimbot::Melee::IgnoreRazorback, FToggleEnum::Right);
 					FToggle(Vars::Aimbot::Melee::SwingPrediction, FToggleEnum::Left);
 					FToggle(Vars::Aimbot::Melee::WhipTeam, FToggleEnum::Right);
 					FToggle(Vars::CritHack::AlwaysMeleeCrit, FToggleEnum::Left);
@@ -549,6 +540,72 @@ void CMenu::MenuAimbot(int iTab)
 					FSlider(Vars::Aimbot::AutoEngie::AutoUpgradeDispenserLVL);
 					FSlider(Vars::Aimbot::AutoEngie::AutoUpgradeTeleporterLVL);
 				} EndSection();
+			}
+			EndTable();
+		}
+		break;
+	}
+	// Triggerbot
+	case 1:
+	{
+		if (BeginTable("AimbotTriggerbotTable", 2))
+		{
+			TableNextColumn();
+			{
+				if (Section("Triggerbot"))
+				{
+					FToggle(Vars::Aimbot::Triggerbot::Enabled, FToggleEnum::Left);
+					FToggle(Vars::Aimbot::Triggerbot::TriggerShot, FToggleEnum::Right);
+
+					PushTransparent(!Vars::Aimbot::Triggerbot::Enabled.Value);
+					{
+						FToggle(Vars::Aimbot::Triggerbot::AutoBackstab, FToggleEnum::Left);
+						FToggle(Vars::Aimbot::Triggerbot::IgnoreRazorback, FToggleEnum::Right);
+						PushTransparent(!Vars::Aimbot::Triggerbot::AutoBackstab.Value);
+						{
+							FDropdown(Vars::Aimbot::Triggerbot::BackstabAimMode, FDropdownEnum::Left);
+							FSlider(Vars::Aimbot::Triggerbot::BackstabFOV, FSliderEnum::Right);
+						}
+						PopTransparent();
+						FToggle(Vars::Aimbot::Triggerbot::AutoSapper, FToggleEnum::Left);
+						FToggle(Vars::Aimbot::Triggerbot::AutoUber, FToggleEnum::Right);
+						FDropdown(Vars::Aimbot::Projectile::AutoDetonate, FDropdownEnum::Left);
+						FDropdown(Vars::Aimbot::Projectile::AutoAirblast, FDropdownEnum::Right);
+						FSlider(Vars::Aimbot::Projectile::AutodetRadius, FSliderEnum::Left);
+						FSlider(Vars::Aimbot::Projectile::SplashRadius, FSliderEnum::Right);
+						FToggle(Vars::Aimbot::Healing::AutoVaccinator, FToggleEnum::Left);
+						FToggle(Vars::Aimbot::Healing::ActivateOnVoice, FToggleEnum::Right);
+						PushTransparent(!Vars::Aimbot::Triggerbot::AutoUber.Value);
+						{
+							FSlider(Vars::Aimbot::Healing::ActivationHealthPercent, FSliderEnum::Left, Vars::Aimbot::Healing::ActivationHealthPercent[DEFAULT_BIND] <= 0.f ? "Off" : "%g%%");
+						}
+						PopTransparent();
+					}
+					PopTransparent();
+
+					PushTransparent(!Vars::Aimbot::Triggerbot::TriggerShot.Value);
+					{
+						FDropdown(Vars::Aimbot::Triggerbot::TriggerPosition);
+					}
+					PopTransparent();
+				} EndSection();
+			}
+
+			TableNextColumn();
+			{
+				if (Section("Backtrack"))
+				{
+					FSlider(Vars::Backtrack::Latency, FSliderEnum::Left);
+					FSlider(Vars::Backtrack::Interp, FSliderEnum::Right);
+					FSlider(Vars::Backtrack::Window);
+				} EndSection();
+				if (Vars::Debug::Options.Value)
+				{
+					if (Section("##Debug Backtrack"))
+					{
+						FSlider(Vars::Backtrack::Offset);
+					} EndSection();
+				}
 			}
 			EndTable();
 		}

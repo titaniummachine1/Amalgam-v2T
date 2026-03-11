@@ -1,6 +1,7 @@
 #include "AimbotHitscan.h"
 
 #include "../Aimbot.h"
+#include "../Triggerbot/Triggerbot.h"
 #include "../../Resolver/Resolver.h"
 #include "../../Ticks/Ticks.h"
 #include "../../Visuals/Visuals.h"
@@ -560,10 +561,17 @@ nextTick:
 	return iReturn;
 }
 
-
-
-bool CAimbotHitscan::ShouldFire(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd, const Target_t& tTarget)
+bool CAimbotHitscan::ShouldFire(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd, const Target_t& tTarget, bool bTriggerShotActive)
 {
+	if (bTriggerShotActive)
+	{
+		if (Vars::Aimbot::Triggerbot::TriggerPosition.Value == Vars::Aimbot::Triggerbot::TriggerPositionEnum::Head
+			&& tTarget.m_nAimedHitbox != HITBOX_HEAD)
+			return false;
+
+		return G::CurrentUserCmd->viewangles.DeltaAngle(tTarget.m_vAngleTo).Length2D() <= 0.5f;
+	}
+
 	if (!Vars::Aimbot::General::AutoShoot.Value)
 		return false;
 
@@ -763,9 +771,10 @@ static inline void DrawVisuals(CTFPlayer* pLocal, Target_t& tTarget, int nWeapon
 	}
 }
 
-void CAimbotHitscan::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
+void CAimbotHitscan::RunInternal(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd, bool bTriggerShotActive)
 {
 	const int nWeaponID = pWeapon->GetWeaponID();
+	const bool bTriggerShotOnly = bTriggerShotActive && !Vars::Aimbot::General::AimType.Value;
 
 	static int iStaticAimType = Vars::Aimbot::General::AimType.Value;
 	const int iLastAimType = iStaticAimType;
@@ -781,7 +790,7 @@ void CAimbotHitscan::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pC
 
 	if (F::AimbotGlobal.ShouldHoldAttack(pWeapon))
 		pCmd->buttons |= IN_ATTACK;
-	if (!Vars::Aimbot::General::AimType.Value
+	if ((!Vars::Aimbot::General::AimType.Value && !bTriggerShotActive)
 		|| !F::AimbotGlobal.ShouldAim() && (nWeaponID != TF_WEAPON_MINIGUN || pWeapon->As<CTFMinigun>()->m_iWeaponState() == AC_STATE_FIRING || pWeapon->As<CTFMinigun>()->m_iWeaponState() == AC_STATE_SPINNING))
 		return;
 
@@ -835,7 +844,7 @@ void CAimbotHitscan::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pC
 
 		const auto iResult = CanHit(tTarget, pLocal, pWeapon);
 		if (!iResult) continue;
-		if (iResult == 2)
+		if (iResult == 2 && !bTriggerShotActive)
 		{
 			G::AimTarget = { tTarget.m_pEntity->entindex(), I::GlobalVars->tickcount, 0 };
 			G::AimPoint = { tTarget.m_vPos, I::GlobalVars->tickcount };
@@ -846,7 +855,7 @@ void CAimbotHitscan::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pC
 		G::AimTarget = { tTarget.m_pEntity->entindex(), I::GlobalVars->tickcount };
 		G::AimPoint = { tTarget.m_vPos, I::GlobalVars->tickcount };
 
-		if (ShouldFire(pLocal, pWeapon, pCmd, tTarget))
+		if (ShouldFire(pLocal, pWeapon, pCmd, tTarget, bTriggerShotActive))
 		{
 			switch (nWeaponID)
 			{
@@ -886,7 +895,8 @@ void CAimbotHitscan::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pC
 		}
 		DrawVisuals(pLocal, tTarget, nWeaponID);
 
-		Aim(pCmd, tTarget.m_vAngleTo);
+		if (!bTriggerShotOnly)
+			Aim(pCmd, tTarget.m_vAngleTo);
 		if (G::SilentAngles)
 		{
 			switch (nWeaponID)
@@ -898,4 +908,14 @@ void CAimbotHitscan::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pC
 		}
 		break;
 	}
+}
+
+void CAimbotHitscan::Run(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
+{
+	RunInternal(pLocal, pWeapon, pCmd, false);
+}
+
+void CAimbotHitscan::RunTriggerbot(CTFPlayer* pLocal, CTFWeaponBase* pWeapon, CUserCmd* pCmd)
+{
+	RunInternal(pLocal, pWeapon, pCmd, true);
 }

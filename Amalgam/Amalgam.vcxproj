@@ -1109,6 +1109,7 @@
     <ClCompile Include="src\Features\Aimbot\AimbotHitscan\AimbotHitscan.cpp" />
     <ClCompile Include="src\Features\Aimbot\AimbotMelee\AimbotMelee.cpp" />
     <ClCompile Include="src\Features\Aimbot\AimbotProjectile\AimbotProjectile.cpp" />
+    <ClCompile Include="src\Features\Aimbot\Triggerbot\Triggerbot.cpp" />
     <ClCompile Include="src\Features\Aimbot\AutoAirblast\AutoAirblast.cpp" />
     <ClCompile Include="src\Features\Aimbot\AutoDetonate\AutoDetonate.cpp" />
     <ClCompile Include="src\Features\Aimbot\AutoRocketJump\AutoRocketJump.cpp" />
@@ -1455,6 +1456,7 @@
     <ClInclude Include="src\Features\Aimbot\AimbotHitscan\AimbotHitscan.h" />
     <ClInclude Include="src\Features\Aimbot\AimbotMelee\AimbotMelee.h" />
     <ClInclude Include="src\Features\Aimbot\AimbotProjectile\AimbotProjectile.h" />
+    <ClInclude Include="src\Features\Aimbot\Triggerbot\Triggerbot.h" />
     <ClInclude Include="src\Features\Aimbot\AutoAirblast\AutoAirblast.h" />
     <ClInclude Include="src\Features\Aimbot\AutoDetonate\AutoDetonate.h" />
     <ClInclude Include="src\Features\Aimbot\AutoRocketJump\AutoRocketJump.h" />

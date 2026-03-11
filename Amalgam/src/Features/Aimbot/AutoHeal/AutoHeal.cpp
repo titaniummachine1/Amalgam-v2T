@@ -5,6 +5,7 @@
 #include "../../CritHack/CritHack.h"
 #include "../../Simulation/ProjectileSimulation/ProjectileSimulation.h"
 #include "../AimbotProjectile/AimbotProjectile.h"
+#include "../Triggerbot/Triggerbot.h"
 
 void CAutoHeal::AutoHeal(CTFPlayer* pLocal, CWeaponMedigun* pWeapon, CUserCmd* pCmd)
 {	// manage lagcomp
@@ -78,6 +79,9 @@ static bool ShouldPopAtHealth(CTFPlayer* pTarget, float flScale, int iResistType
 
 void CAutoHeal::Activate(CTFPlayer* pLocal, CWeaponMedigun* pWeapon, CUserCmd* pCmd)
 {
+	if (!Triggerbot::AllowAutoUber())
+		return;
+
 	if (!Vars::Aimbot::Healing::ActivateOnVoice.Value && !Vars::Aimbot::Healing::ActivationHealthPercent.Value)
 		return;
 
@@ -614,7 +618,7 @@ void CAutoHeal::ActivateResistType(CUserCmd* pCmd, int iType)
 
 void CAutoHeal::AutoVaccinator(CTFPlayer* pLocal, CWeaponMedigun* pWeapon, CUserCmd* pCmd)
 {
-	if (!Vars::Aimbot::Healing::AutoVaccinator.Value || pWeapon->GetMedigunType() != MEDIGUN_RESIST)
+	if (!Triggerbot::AllowAutoVaccinator() || pWeapon->GetMedigunType() != MEDIGUN_RESIST)
 		return;
 
 #ifdef DEBUG_VACCINATOR

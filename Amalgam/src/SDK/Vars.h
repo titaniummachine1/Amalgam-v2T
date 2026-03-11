@@ -321,6 +321,23 @@ NAMESPACE_BEGIN(Vars)
 			CVar(NoSpreadBackupInterval, "No spread backup interval", 2.f, NOSAVE | DEBUGVAR | SLIDER_MIN, 2.f, 10.f, 0.1f, "%gs");
 		NAMESPACE_END(General)
 
+		NAMESPACE_BEGIN(Triggerbot)
+			CVar(Enabled, VA_LIST("Enabled", "Triggerbot utilities enabled"), false);
+			CVar(TriggerShot, "Trigger shoot", false);
+			CVar(TriggerShotKey, "Trigger shoot key", 0, NOBIND);
+			CVarEnum(TriggerPosition, "Trigger position", 1, NONE, nullptr,
+				VA_LIST("Head", "Hitscan"),
+				Head, Hitscan);
+			CVar(AutoBackstab, "Auto backstab", true);
+			CVar(IgnoreRazorback, "Ignore razorback", true);
+			CVarEnum(BackstabAimMode, "Backstab aim mode", 0, NONE, nullptr,
+				VA_LIST("Aim", "No aim"),
+				Aim, NoAim);
+			CVar(BackstabFOV, "Backstab FOV", 30.f, SLIDER_MIN | SLIDER_PRECISION, 0.f, 180.f, 1.f);
+			CVar(AutoSapper, "Auto sapper", false);
+			CVar(AutoUber, "Auto uber", false);
+		NAMESPACE_END(Triggerbot)
+
 		NAMESPACE_BEGIN(Hitscan)
 			CVarEnum(Hitboxes, VA_LIST("Hitboxes", "Hitscan hitboxes"), 0b000111, DROPDOWN_MULTI, nullptr,
 				VA_LIST("Head", "Body", "Pelvis", "Arms", "Legs", "##Divider", "Bodyaim if lethal", "Headshot only"),
